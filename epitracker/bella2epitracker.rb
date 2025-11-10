@@ -39,6 +39,10 @@ def validate_bella_folder(folder)
         return false
     end
 
+    if Dir["#{folder}/reportree/*dist_hamming.tsv"].empty?
+        return false
+    end
+
     return valid
     
 end
@@ -85,6 +89,16 @@ def make_cgmlst_profile(sample, schema, alleles)
 
 end
 
+def compress_file(file_path)
+
+    data = IO.readlines(file_path).join("\n")
+    compressed_data = Zlib::Deflate.deflate(data)
+    encoded_data = Base64.encode64(compressed_data)
+
+    return encoded_data
+
+end
+
 def log(message)
 
     this_date = Time.now
@@ -106,7 +120,7 @@ opts.on("-h","--help","Display the usage information") {
 
 opts.parse! 
 
-options.db ? db_file = options.db : db_file = "/home/marc/git/epitracker/storage/development.sqlite3"
+options.db ? db_file = options.db : db_file = "/home/mhoeppner/git/epitracker/storage/development.sqlite3"
 
 Epitracker::DBConnection.connect({database: db_file})
 
@@ -127,10 +141,14 @@ schema = json["schema"].split("/")[-1]
 alleles_file = Dir["#{options.input}/chewbbaca/results_*/results_alleles.tsv"].first
 alleles = IO.readlines(alleles_file)
 
+hamming_distance_file = Dir["#{options.input}/reportree/*dist_hamming.tsv"].first
+distances = compress_file(hamming_distance_file)
+
 status_matrix = {}
 status_file = Dir["#{options.input}/reportree/*nomenclature_changes.tsv"].first
 if status_file 
     lines = IO.readlines(status_file)
+    # cluster column includes a date, remove
     header = lines.shift.split("\t").map {|h| h.gsub(/_[0-9]*-[0-9]*-[0-9]*/, "")}
     lines.each do |line|
         elements = line.split("\t")
@@ -161,6 +179,7 @@ end
 payload = {
     "cgmlst_schema_id" => cgmlst_schema.id,
     "comments" => "",
+    "hamming_distance" => distances,
     "tree" => tree.strip
 }
 analysis = Epitracker::ClusterAnalysis.create(payload)
@@ -191,7 +210,7 @@ partitions.each do |part|
 
             sample = Epitracker::Sample.find_by_name(sample_name)
 
-            cgmlst_profiles = sample.cgmlst_profiles
+            cgmlst_profiles = sample.assemblies.first.cgmlst_profiles
 
             this_profile = cgmlst_profiles.find {|c| c.cgmlst_schema_id == cgmlst_schema.id }
             if !this_profile

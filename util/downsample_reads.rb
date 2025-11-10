@@ -41,7 +41,7 @@ task_queue = Queue.new
 options.cores ? cores = options.cores.to_i : cores = 4
 buckets = [ 1000, 2000, 5000, 10000, 15000, 20000, 25000, 30000, 40000, 50000, 75000, 100000 ]
 
-options.seed ? seed = options.seed : seed = "123456"
+options.seed ? seed = options.seed : seed = "12345"
 
 check_binary("seqtk")
 

@@ -48,7 +48,7 @@ opts.on("-h","--help","Display the usage information") {
 }
 opts.parse! 
 
-options.db ? db_file = options.db : db_file = "/home/marc/git/epitracker/storage/development.sqlite3"
+options.db ? db_file = options.db : db_file = "/home/mhoeppner/git/epitracker/storage/development.sqlite3"
 
 Epitracker::DBConnection.connect({database: db_file})
 
@@ -77,7 +77,7 @@ if !failed.empty?
 
     while proceed == false
 
-        warn "We have #{failed.length} samples - proceed (y/n)?"
+        warn "We have #{failed.length} samples - proceed by skipping these (y/n)?"
         answer = gets.chomp
 
         if answer == "y"
@@ -116,25 +116,85 @@ jsons.each do |json|
         exit
     end
 
-    payload = {
-        "organism_id" => o.id,
-        "name" => sample
-    }
-    s = Epitracker::Sample.create(payload)
+    s = Epitracker::Sample.find_by_name(sample)
 
-    fasta = IO.readlines(assembly).join("\n")
-    compressed_fasta = Zlib::Deflate.deflate(fasta)
-    encoded_fasta = Base64.encode64(compressed_fasta)
-    md5 = Digest::MD5.hexdigest(fasta)
+    if s
+        warn "Sample #{sample} already in the database, skiping!"
+    else
+        payload = {
+            "organism_id" => o.id,
+            "name" => sample
+        }
+        s = Epitracker::Sample.create(payload)
 
-    payload = {
-        "sample_id" => s.id,
-        "fasta" => encoded_fasta,
-        "fasta_md5" => md5,
-        "pipeline" => "GABI",
-        "pipeline_version" => version
-    }
+        fasta = IO.readlines(assembly).join("\n")
+        compressed_fasta = Zlib::Deflate.deflate(fasta)
+        encoded_fasta = Base64.encode64(compressed_fasta)
+        md5 = Digest::MD5.hexdigest(fasta)
 
-    a = Epitracker::Assembly.create(payload)
+        payload = {
+            "sample_id" => s.id,
+            "fasta" => encoded_fasta,
+            "fasta_md5" => md5,
+            "pipeline" => "GABI",
+            "pipeline_version" => version
+        }
+
+        a = Epitracker::Assembly.create(payload)
+
+        serotype = nil
+        n50 = nil
+        n_scaffolds= nil
+        qc = nil
+        mlst_type = nil
+        mlst_schema = nil
+        pathotype = nil
+        busco = nil
+
+        if json["serotype"] && json["serotype"].length > 0
+            serodata = json["serotype"]
+            serodata.each do |tool,sd|
+                if sd["Pathotype"]
+                    pathotype = sd["Pathotype"]
+                end
+                if sd["Serotype"]
+                    serotype = sd["Serotype"]
+                elsif sd["SEROTYPE"]
+                    serotype = sd["SEROTYPE"]
+                end
+            end
+        end
+
+        if json["mlst"] && json["mlst"].length > 0
+            mdata = json["mlst"].first
+            mlst_schema = mdata["scheme"]
+            mlst_type = mdata["sequence_type"]
+        end
+
+        qc = json["qc"]["call"]
+
+        n50 = json["quast"]["N50"]
+        n_scaffolds = json["quast"]["# contigs"]
+        assembly_size = json["quast"]["Total length"]
+
+        busco = json["busco"]["one_line_summary"]
+
+        payload = {
+            "assembly_id" => a.id,
+            "serotype" => serotype,
+            "n50" => n50,
+            "n_scaffolds" => n_scaffolds,
+            "qc" => qc,
+            "mlst_type" => mlst_type,
+            "mlst_schema" => mlst_schema,
+            "pathotype" => pathotype,
+            "busco" => busco,
+            "assembly_size" => assembly_size
+        }
+
+        i = Epitracker::AssemblyInfo.create(payload)
+
+            
+    end
 
 end

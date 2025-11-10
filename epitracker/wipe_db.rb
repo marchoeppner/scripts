@@ -22,14 +22,17 @@ opts.on("-h","--help","Display the usage information") {
 
 opts.parse! 
 
-options.db ? db_file = options.db : db_file = "/home/marc/git/epitracker/storage/development.sqlite3"
+options.db ? db_file = options.db : db_file = "/home/mhoeppner/git/epitracker/storage/development.sqlite3"
 
 Epitracker::DBConnection.connect({database: db_file})
 
+samples = Epitracker::Sample.all
+
+samples.each do |sample|
+    sample.destroy
+end
+
 analyses = Epitracker::ClusterAnalysis.all
-
-analyses.each do |analysis|
-
-    analysis.destroy
-
+analyses.each do |a|
+    a.destroy
 end
