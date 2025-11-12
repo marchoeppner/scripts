@@ -26,13 +26,14 @@ options.db ? db_file = options.db : db_file = "/home/mhoeppner/git/epitracker/st
 
 Epitracker::DBConnection.connect({database: db_file})
 
+analyses = Epitracker::ClusterAnalysis.all
+analyses.each do |a|
+	a.destroy
+end
+
 samples = Epitracker::Sample.all
 
 samples.each do |sample|
     sample.destroy
 end
 
-analyses = Epitracker::ClusterAnalysis.all
-analyses.each do |a|
-    a.destroy
-end
