@@ -77,7 +77,7 @@ if !failed.empty?
 
     while proceed == false
 
-        warn "We have #{failed.length} samples - proceed by skipping these (y/n)?"
+        warn "We have #{failed.length} failed samples - proceed by skipping these (y/n)?"
         answer = gets.chomp
 
         if answer == "y"
@@ -127,7 +127,7 @@ jsons.each do |json|
         }
         s = Epitracker::Sample.create(payload)
 
-        fasta = IO.readlines(assembly).join("\n")
+        fasta = IO.readlines(assembly).join
         compressed_fasta = Zlib::Deflate.deflate(fasta)
         encoded_fasta = Base64.encode64(compressed_fasta)
         md5 = Digest::MD5.hexdigest(fasta)
