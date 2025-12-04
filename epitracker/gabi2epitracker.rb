@@ -161,6 +161,8 @@ jsons.each do |json|
                     serotype = sd["Serotype"]
                 elsif sd["SEROTYPE"]
                     serotype = sd["SEROTYPE"]
+                elsif sd["Predicted serotype"]
+                    serotype = sd["Predicted serotype"]
                 end
             end
         end
