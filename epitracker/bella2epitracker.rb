@@ -134,6 +134,9 @@ end
 json_file = Dir["#{options.input}/report/*.json"].first
 json = JSON.parse(IO.readlines(json_file).join)
 
+date_string = json["date"]
+analysis_date = Date.parse(date_string)
+
 clusters = json["clusters"]
 tree = json["tree"]
 schema = json["schema"].split("/")[-1]
@@ -180,8 +183,10 @@ payload = {
     "cgmlst_schema_id" => cgmlst_schema.id,
     "comments" => "",
     "hamming_distance" => distances,
-    "tree" => tree.strip
+    "tree" => tree.strip,
+    "created_at" => analysis_date
 }
+
 analysis = Epitracker::ClusterAnalysis.create(payload)
 log("Built a new analysis...")
 
