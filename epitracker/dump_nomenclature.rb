@@ -22,7 +22,7 @@ opts.on("-h","--help","Display the usage information") {
 
 opts.parse! 
 
-options.db ? db_file = options.db : db_file = "/home/mhoeppner/git/epitracker/storage/development.sqlite3"
+options.db ? db_file = options.db : db_file = "/work_syn/ngs/projects/epitracker/db/development.sqlite3"
 
 Epitracker::DBConnection.connect({database: db_file})
 

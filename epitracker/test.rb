@@ -21,12 +21,16 @@ opts.on("-h","--help","Display the usage information") {
 
 opts.parse! 
 
-db_file = "/home/marc/git/epitracker/storage/development.sqlite3"
+db_file = "/work_syn/ngs/projects/epitracker/db/development.sqlite3"
 
 Epitracker::DBConnection.connect({database: db_file})
 
-organisms = Epitracker::Organism.all
+sample = Epitracker::Sample.find_by_name("LC10-22-RV4-P64-E04")
 
-organisms.each do |o|
-    puts o.inspect
-end
+assembly = sample.assemblies.first
+
+profile = assembly.cgmlst_profiles.first
+
+profile_unzip = Zlib.inflate(Base64.decode64(profile.profile))
+
+puts profile_unzip

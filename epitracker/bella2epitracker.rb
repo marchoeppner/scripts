@@ -11,7 +11,10 @@ require 'epitracker'
 require 'json'
 require "zlib"
 require 'base64'
+require 'logger'
 
+
+# Cache database entries to avoid costly queries
 @cache = []
 
 
@@ -51,15 +54,24 @@ def get_cluster(partition, name)
 
     cached_cluster = @cache.find { |c| c.cgmlst_partition_id == partition.id && c.name == name }
     if cached_cluster
+        warn "Cluster #{name} was cached!"
         return cached_cluster
     else
-        payload = {
-            "cgmlst_partition_id" => partition.id,
-            "name" => name
-        }
-        cluster = Epitracker::Cluster.create(payload)
-        @cache << cluster
-        return cluster
+        cluster = Epitracker::Cluster.where(cgmlst_partition_id: partition.id, name: name).first
+        if cluster
+            warn "Cluster #{name} found, adding to cache"
+            @cache << cluster
+            return cluster
+        else
+            payload = {
+                "cgmlst_partition_id" => partition.id,
+                "name" => name
+            }
+            cluster = Epitracker::Cluster.create(payload)
+            @cache << cluster
+            warn "Cluster #{name} created"
+            return cluster
+        end
     end
 
 end
@@ -71,7 +83,7 @@ def make_cgmlst_profile(sample, schema, alleles)
 
     assembly = sample.assemblies.first
 
-    profile = data.join("\n")
+    profile = data.join
     compressed_profile = Zlib::Deflate.deflate(profile)
     encoded_profile = Base64.encode64(compressed_profile)
 
@@ -91,7 +103,7 @@ end
 
 def compress_file(file_path)
 
-    data = IO.readlines(file_path).join("\n")
+    data = IO.readlines(file_path).join
     compressed_data = Zlib::Deflate.deflate(data)
     encoded_data = Base64.encode64(compressed_data)
 
@@ -99,11 +111,12 @@ def compress_file(file_path)
 
 end
 
-def log(message)
+def compress_string(data)
 
-    this_date = Time.now
-    warn "#{this_date}: #{message}"
-    sleep 1
+    compressed_data = Zlib::Deflate.deflate(data)
+    encoded_data = Base64.encode64(compressed_data)
+
+    return encoded_data
 
 end
 
@@ -113,6 +126,7 @@ opts = OptionParser.new()
 opts.on("-i","--input", "=INPUT","Bella results folder") {|argument| options.input = argument }
 opts.on("-d","--db", "=DB","Path to db file") {|argument| options.db = argument }
 opts.on("-o","--outfile", "=OUTFILE","Output file") {|argument| options.outfile = argument }
+opts.on("-t","--date", "=DATE","Creation date to use") {|argument| options.date = argument }
 opts.on("-h","--help","Display the usage information") {
     puts opts
     exit
@@ -120,9 +134,13 @@ opts.on("-h","--help","Display the usage information") {
 
 opts.parse! 
 
-options.db ? db_file = options.db : db_file = "/home/mhoeppner/git/epitracker/storage/development.sqlite3"
+options.db ? db_file = options.db : db_file = "/work_syn/ngs/projects/epitracker/db/development.sqlite3"
+options.date ? analysis_date = Date.parse(options.date) : analysis_date = false
 
 Epitracker::DBConnection.connect({database: db_file})
+
+log = Logger.new File.open('bella.log', 'w')
+log.level = Logger::INFO
 
 valid = validate_bella_folder(options.input)
 
@@ -135,7 +153,9 @@ json_file = Dir["#{options.input}/report/*.json"].first
 json = JSON.parse(IO.readlines(json_file).join)
 
 date_string = json["date"]
-analysis_date = Date.parse(date_string)
+if analysis_date.nil?
+    analysis_date = Date.parse(date_string)
+end
 
 clusters = json["clusters"]
 tree = json["tree"]
@@ -183,18 +203,18 @@ payload = {
     "cgmlst_schema_id" => cgmlst_schema.id,
     "comments" => "",
     "hamming_distance" => distances,
-    "tree" => tree.strip,
+    "tree" => compress_string(tree.strip),
     "created_at" => analysis_date
 }
 
 analysis = Epitracker::ClusterAnalysis.create(payload)
-log("Built a new analysis...")
+log.info "Built a new analysis (id: #{analysis.id})..."
 
-log("Found #{partitions.length} configured partitions, iterating now...")
+log.info "Found #{partitions.length} configured partitions, iterating now..."
 
 partitions.each do |part|
 
-    log("Processing partition #{part.distance}...")
+    log.info "Processing partition #{part.distance}..."
 
     # Link the partition to this analysis
     payload = {
@@ -202,42 +222,46 @@ partitions.each do |part|
         "cluster_analysis_id" => analysis.id
     }
     xref_analysis_partition = Epitracker::XrefAnalysisPartition.create(payload)
-    log("Linking partition #{part.distance} to the new analysis...")
+    log.info "Linking partition #{part.distance} to the new analysis (id: #{xref_analysis_partition.id})..."
 
     clusters.each do |dist,entries|
 
         # only get the clusters for this clustering distance
         next unless dist.to_i == part.distance
 
-        log("Found clusters calculated for this partition...")
+        log.info "Found clusters calculated for this partition..."
 
         entries.each do |sample_name,cluster_name|
 
+            log.info "Processing sample #{sample_name}.."
             sample = Epitracker::Sample.find_by_name(sample_name)
+            if !sample
+                abort "Missing sample #{sample_name} in database!"
+            end
 
             cgmlst_profiles = sample.assemblies.first.cgmlst_profiles
 
             this_profile = cgmlst_profiles.find {|c| c.cgmlst_schema_id == cgmlst_schema.id }
             if !this_profile
-                log("Missing a cgMLST profile for #{sample_name} - building new one.")
+                log.info "Missing a cgMLST profile for #{sample_name} - building new one."
                 this_profile = make_cgmlst_profile(sample, cgmlst_schema, alleles)
             end
 
             # get existing cluster or create new one
             cluster = get_cluster(part, cluster_name)
-            log("Checked and created Cluster #{cluster_name}...")
+            log.info "Checked and created Cluster #{cluster_name}..."
 
             xref_analysis_partition_cluster = Epitracker::XrefAnalysisPartitionCluster.where(cluster_id: cluster.id, xref_analysis_partition_id: xref_analysis_partition.id).first
 
             if !xref_analysis_partition_cluster
                 # link cluster to analysis-partition link
-                log("Cluster not yet linked to this partition analysis...")
+                log.info "Cluster #{cluster_name} (#{cluster.id}) not yet linked to this partition analysis (#{xref_analysis_partition.id})..."
                 status = "new"
                 if status_matrix.has_key?(part.partition)
                     entry = status_matrix[part.partition].find {|s| s["cluster"] == cluster_name }
                     if entry
                         status = entry["nomenclature_change"]
-                        log("Updating cluster status to #{status}")
+                        log.info "Updating cluster status to #{status}"
                     end
                 end
                 
@@ -248,7 +272,7 @@ partitions.each do |part|
                     "status" => status
                 }
                 xref_analysis_partition_cluster = Epitracker::XrefAnalysisPartitionCluster.create(payload)
-                log("Linked cluster to the analysis partition...")
+                log.info "Linked cluster #{cluster_name} (#{cluster.id}) to the analysis partition (#{xref_analysis_partition.id})..."
             end
 
             # Link cgmlst profile (=assembly) to cluster and analysis_partition
@@ -257,8 +281,9 @@ partitions.each do |part|
                 "cgmlst_profile_id" => this_profile.id,
                 "xref_analysis_partition_id" => xref_analysis_partition.id
             }
+
             xref_profile_analysis_partition_cluster = Epitracker::XrefProfileAnalysisPartitionCluster.create(payload)
-            log("Linked together cgMLST profile, cluster and analysis partition...")
+            log.info "Linked together cgMLST profile, cluster and analysis partition..."
         end
 
     end

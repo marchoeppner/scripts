@@ -11,6 +11,7 @@ require 'epitracker'
 require "zlib"
 require 'base64'
 require 'digest'
+require 'progressbar'
 
 def validate_gabi_folder(folder)
 
@@ -41,6 +42,7 @@ options = OpenStruct.new()
 opts = OptionParser.new()
 opts.on("-i","--input", "=INPUT","Path to GABI results folder") {|argument| options.input = argument }
 opts.on("-d","--db", "=DB","Path to db file") {|argument| options.db = argument }
+opts.on("-t","--date", "=DATE","Creation date to use") {|argument| options.date = argument }
 opts.on("-o","--outfile", "=OUTFILE","Output file") {|argument| options.outfile = argument }
 opts.on("-h","--help","Display the usage information") {
     puts opts
@@ -48,7 +50,9 @@ opts.on("-h","--help","Display the usage information") {
 }
 opts.parse! 
 
-options.db ? db_file = options.db : db_file = "/home/mhoeppner/git/epitracker/storage/development.sqlite3"
+options.db ? db_file = options.db : db_file = "/work_syn/ngs/projects/epitracker/db/development.sqlite3"
+
+options.date ? analysis_date = Date.parse(options.date) : analysis_date = false
 
 Epitracker::DBConnection.connect({database: db_file})
 
@@ -88,11 +92,20 @@ if !failed.empty?
 
     end
 end
+
+pg = ProgressBar.create(:title => "Jsons", :total => jsons.length)
+
 jsons.each do |json|
 
+    pg.increment
     next if json["qc"]["status"] == "failed"
 
     genus,species = json["taxon"].split(" ")
+
+    date_string = json["date"]
+    if analysis_date.nil?
+        analysis_date = Date.parse(date_string)
+    end
 
     if genus.nil? || species.nil?
         warn "Species name not following genus/species convention (was: #{genus} #{species})"
@@ -106,7 +119,7 @@ jsons.each do |json|
 
     if !o
         warn "Taxon #{genus} #{species} not found in database!"
-        exit
+        next
     end
 
     assembly = assemblies.find {|a| a.include?(sample)}
@@ -123,7 +136,8 @@ jsons.each do |json|
     else
         payload = {
             "organism_id" => o.id,
-            "name" => sample
+            "name" => sample,
+            "created_at" => analysis_date
         }
         s = Epitracker::Sample.create(payload)
 
@@ -137,7 +151,8 @@ jsons.each do |json|
             "fasta" => encoded_fasta,
             "fasta_md5" => md5,
             "pipeline" => "GABI",
-            "pipeline_version" => version
+            "pipeline_version" => version,
+            "created_at" => analysis_date
         }
 
         a = Epitracker::Assembly.create(payload)
@@ -191,7 +206,8 @@ jsons.each do |json|
             "mlst_schema" => mlst_schema,
             "pathotype" => pathotype,
             "busco" => busco,
-            "assembly_size" => assembly_size
+            "assembly_size" => assembly_size,
+            "created_at" => analysis_date
         }
 
         i = Epitracker::AssemblyInfo.create(payload)
@@ -200,3 +216,5 @@ jsons.each do |json|
     end
 
 end
+
+pg.finish

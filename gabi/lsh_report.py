@@ -1,0 +1,353 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import argparse
+import json
+from reportlab.lib.enums import TA_JUSTIFY, TA_RIGHT
+from reportlab.lib.units import cm
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.graphics.shapes import Drawing, Line
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, PageBreak
+from reportlab.lib import colors
+
+from datetime import date
+
+
+def get_status(key, reference):
+
+    qc_pass = reference["pass"]
+    if key in qc_pass:
+        return "pass"
+    qc_fail = reference["fail"]
+    if key in qc_fail:
+        return "fail"
+    qc_warn = reference["warn"]
+    if key in qc_warn:
+        return "warn"
+    qc_missing = reference["missing"]
+    if key in qc_missing:
+        return "missing"
+
+    return "missing"
+
+
+def get_serotype(serotypes):
+
+    result = {"serotype": "", "pathotype": None, "genes": None, "classification": None, "tool": None}
+
+    for tool, data in serotypes.items():
+
+        if (tool == "sccmec"):
+            result["tool"] = tool
+            result["serotype"] = data["type"]
+            if (data["mecA"] == "+"):
+                result["genes"] = "mecA"
+        elif (tool == "ectyper"):
+            result["tool"] = tool
+            result["serotype"] = data["Serotype"]
+            result["genes"] = data["PathotypeGenes"]
+            if "ND" not in data["Pathotype"]:
+                result["pathotype"] = data["Pathotype"]
+            result["classification"] = data["StxSubtypes"]
+        elif (tool == "sistr"):
+            result["tool"] = tool
+            result["serotype"] = data["serogroup"]
+            result["pathotype"] = data["serovar"]
+        elif (tool == "kaptive"):
+            result["tool"] = tool
+            result["serotype"] = data["best_match"]
+        elif (tool == "lissero"):
+            result["tool"] = tool
+            result["serotype"] = data["SEROTYPE"]
+        elif (tool == "btyper3"):
+            result["tool"] = tool
+            result["serotype"] = data["Adjusted_panC_Group(predicted_species)"]
+            result["gene"] = data["Bt(genes)"]
+
+    return result
+
+
+today = date.today()
+date = today.strftime("%d.%m.%Y")
+
+# Command line arguments
+parser = argparse.ArgumentParser(description="Script options")
+parser.add_argument("--json")
+parser.add_argument("--logo", required=True)
+parser.add_argument("--output")
+args = parser.parse_args()
+
+# Use defaults or take from command line
+outfile = args.output if args.output else "report.pdf"
+
+content = []
+
+pdf = SimpleDocTemplate(outfile, pagesize=A4,
+                        rightMargin=35, leftMargin=35,
+                        topMargin=20, bottomMargin=20)
+
+# Define styles
+styles = getSampleStyleSheet()
+styles.add(ParagraphStyle(name='Justify', alignment=TA_JUSTIFY))
+styles.add(ParagraphStyle(name='H1', fontSize=14))
+styles.add(ParagraphStyle(name='H2', fontSize=12))
+
+styles.add(ParagraphStyle(name='H2_bg', backColor="#CCCCCC", borderPadding=4, fontSize=12))
+styles.add(ParagraphStyle(name='Standard', fontSize=10))
+styles.add(ParagraphStyle(name='Gray', fontSize=10, textColor="#9c9c9c"))
+
+styles.add(ParagraphStyle(name='Bold', fontSize=10, fontName="Helvetica-Bold"))
+styles.add(ParagraphStyle(name='H2_right', fontSize=12, alignment=TA_RIGHT))
+styles.add(ParagraphStyle(name='Info', fontSize=8))
+styles.add(ParagraphStyle(name='Sequence', fontSize=8, fontName="Courier"))
+
+styles.add(ParagraphStyle(name='Status_pass', backColor="#72CC77", fontSize=10))
+styles.add(ParagraphStyle(name='Status_fail', backColor="#C04B42", fontSize=10))
+styles.add(ParagraphStyle(name='Status_warn', backColor="#CECB43", fontSize=10))
+styles.add(ParagraphStyle(name='Status_missing', fontSize=10))
+
+styles.add(ParagraphStyle(name='Unicode', fontName="D050000L", fontSize=10))
+
+status_styles = {
+    "pass": styles["Status_pass"],
+    "fail": styles["Status_fail"],
+    "warn": styles["Status_warn"],
+    "missing": styles["Status_missing"],
+}
+
+qc_lookups = {
+    "Total length": "quast_assembly",
+    "# contigs": "quast_contigs",
+    "N50": "quast_n50",
+    "GC (%)": "quast_gc",
+    "Duplication ratio": "quast_duplication"
+}
+
+# The header
+logo = Image(args.logo, height=3 * cm, width=6 * cm)
+logo.hAlign = "RIGHT"
+content.append(logo)
+content.append(Spacer(1, 20))
+
+##############################
+# Parse JSON
+##############################
+# Parse JSON file to extract relevant information
+with open(args.json) as json_file:
+    data = json.load(json_file)
+
+sample = data["sample"]
+run_date = data["date"]
+qc = data["qc"]
+settings = data["pipeline_settings"]
+taxon = data["taxon"]
+quast = data["quast"]
+amr_finder = data["amr"]["amrfinder"]
+amrs = sorted(amr_finder, key=lambda x: x['Gene symbol'])
+
+mlst = data["mlst"]
+serotype = data["serotype"]
+plasmids = data["plasmids"]
+coverage = data["mosdepth"]["total"]["mean"]
+coverage_status = get_status("coverage_total_mean", qc)
+
+assembly_size = round(float(quast["Total length"] / 1000000), 3)
+
+##############################
+# PDF construction starts here
+##############################
+disclaimer = f"Anlage zum Prüfbericht {sample}"
+
+content.append(Paragraph(disclaimer, styles["Normal"]))
+content.append(Spacer(1, 12))
+
+header = "Bericht zur Gesamtgenom-Sequenzierung mittels NGS (M-2448)"
+
+content.append(Paragraph(header, styles["H1"]))
+content.append(Spacer(1, 12))
+
+subheader = "Qualitätsbewertung und Charakterisierung"
+content.append(Paragraph(subheader, styles["H2"]))
+
+content.append(Spacer(1, 12))
+
+key_translation = {
+    "Total length": "Gesamtgröße",
+    "# contigs": "Anzahl Contigs",
+    "N50": "N50",
+    "# contigs (>= 1000 bp)": "Anzahl Contigs > 1kb",
+    "GC (%)": "GC Gehalt (%)",
+    "Largest contig": "Größtes Contig",
+    "Duplication ratio": "Duplikations-Ratio"
+}
+
+####################
+# Section: Uebersicht
+####################
+
+content.append(Spacer(1, 4))
+
+d = Drawing(100, 0.5)
+d.add(Line(0, 0, 450, 0))
+content.append(d)
+content.append(Spacer(1, 10))
+
+content.append(Paragraph(f"Pipeline: {settings['pipeline']}", styles["Info"]))
+content.append(Paragraph(f"Version: {settings['version']}", styles["Info"]))
+
+content.append(Spacer(1, 20))
+
+content.append(Paragraph("Übersicht", styles["H2_bg"]))
+content.append(Spacer(1, 10))
+
+mlst = data["mlst"][0]
+serotypes = data["serotype"]
+
+summary = []
+
+summary.append(["Untersuchte Probe", sample])
+summary.append(["Status der Sequenzierung", Paragraph(qc["call"], status_styles[qc["call"]])])
+summary.append(["Mittlere Sequenziertiefe", Paragraph(f"{coverage} X", status_styles[coverage_status])])
+summary.append(["Ermitteltes Taxon", f"{taxon}"])
+summary.append(["Assemblygröße (Mb)", Paragraph(f"{assembly_size}", styles["Normal"])])
+summary.append(["Contigs > 1kb", quast["# contigs (>= 1000 bp)"]])
+summary.append(["Plasmide", f"{len(plasmids)}"])
+if (mlst):
+    summary.append(["MLST Typ / Schema", f"{mlst['sequence_type']} ({mlst['scheme']})"])
+
+if (len(serotypes) > 0):
+    this_sero = get_serotype(serotypes)
+    summary.append(["Serotyp", f"{this_sero['serotype']} ({this_sero['tool']})"])
+    if (this_sero["pathotype"]):
+        summary.append(["Pathotyp", this_sero["pathotype"]])
+
+summary.append(["Datum der Auswertung", run_date])
+
+summary_table = Table(summary, colWidths=[7 * cm, 8 * cm], splitByRow=1, hAlign='LEFT')
+
+summary_table.setStyle([
+    ('LINEABOVE', (0, 1), (-1, -1), 0.25, colors.black),
+    ('VALIGN', (0, 0), (-1, -1), 'TOP')
+])
+
+content.append(summary_table)
+
+content.append(Spacer(1, 20))
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Assembly Metriken
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+content.append(Paragraph("Assembly Metriken", styles["H2_bg"]))
+content.append(Spacer(1, 10))
+
+info = "Metriken zur Beschreibung der rekonstruierten Genomsequenz"
+
+content.append(Paragraph(info, styles["Info"]))
+content.append(Spacer(1, 10))
+
+quast_metrics = [[Paragraph("Metrik", styles["Bold"]), Paragraph("Wert", styles["Bold"])]]
+
+quast_keys = [
+    "Total length", "# contigs", "N50", "GC (%)", "Duplication ratio"
+]
+
+for key in quast_keys:
+    translation = key_translation[key] if key in key_translation else key
+    value = quast[key]
+    status_key = qc_lookups[key] if key in qc_lookups else None
+    qc_status = get_status(status_key, qc) if status_key else "missing"
+
+    quast_metrics.append([Paragraph(translation, styles["Normal"]), Paragraph(f"{value}", status_styles[qc_status])])
+
+busco = data["busco"]
+busco_total = int(busco["dataset_total_buscos"])
+busco_complete = int(busco["C"])
+busco_completeness = round(float(busco_complete / busco_total), 2) * 100
+busco_duplicates = int(busco["D"])
+busco_duplication = round(float(busco_duplicates / busco_total), 2) * 100
+
+busco_complete_status = get_status("busco_completeness", qc)
+busco_duplication_status = get_status("busco_duplicates", qc)
+
+quast_metrics.append(["BUSCO Gene vollständig (%)", Paragraph(f"{busco_completeness}", status_styles[busco_complete_status])])
+quast_metrics.append(["BUSCO Gene dupliziert (%)", Paragraph(f"{busco_duplication}", status_styles[busco_duplication_status])])
+
+quast_metrics_table = Table(quast_metrics, colWidths=[6 * cm, 4 * cm], splitByRow=1, hAlign='LEFT')
+
+quast_metrics_table.setStyle([
+    ('LINEABOVE', (0, 1), (-1, -1), 0.25, colors.black),
+    ('VALIGN', (0, 0), (-1, -1), 'TOP')
+])
+
+content.append(quast_metrics_table)
+
+content.append(PageBreak())
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Charakterisierung
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+content.append(Spacer(1, 20))
+content.append(Paragraph("Resistenz- und Virulenzgene", styles["H2_bg"]))
+content.append(Spacer(1, 10))
+
+characterization = [[Paragraph("Gen", styles["Bold"]), Paragraph("Beschreibung", styles["Bold"]), Paragraph("Klasse", styles["Bold"]), Paragraph("Typ", styles["Bold"])]]
+
+for amr in amrs:
+    characterization.append([Paragraph(amr['Gene symbol'], styles["Bold"]), Paragraph(amr['Sequence name'], styles["Normal"]), Paragraph(amr['Class'], styles["Normal"]), Paragraph(amr['Element type'], styles["Normal"])])
+
+characterization_table = Table(characterization, colWidths=[2 * cm, 8 * cm, 3 * cm, 3 * cm], splitByRow=1, hAlign='LEFT')
+
+characterization_table.setStyle([
+    ('LINEABOVE', (0, 1), (-1, -1), 0.25, colors.black),
+    ('VALIGN', (0, 0), (-1, -1), 'TOP')
+])
+
+content.append(characterization_table)
+
+content.append(PageBreak())
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# QC Metriken
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+content.append(Spacer(1, 20))
+content.append(Paragraph("Qualitätskontrolle", styles["H2_bg"]))
+content.append(Spacer(1, 10))
+
+qc_warnings = qc["messages"]
+
+qc_entries = []
+
+busco = data["busco"]
+busco_score = busco["one_line_summary"]
+busco_status = get_status("busco_completeness", qc)
+
+confindr = data["confindr"]
+confindr_statutus = get_status("confindr_illumina", qc)
+
+content.append(PageBreak())
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Pipeline Einstellungen
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+content.append(Paragraph("Einstellungen", styles["H2_bg"]))
+content.append(Spacer(1, 10))
+
+software = []
+for key, values in settings.items():
+    if type(values) is not dict:
+        software.append([key, Paragraph(str(values), styles["Normal"])])
+
+software_table = Table(software, colWidths=[7 * cm, 8 * cm], splitByRow=1, hAlign='LEFT')
+
+software_table.setStyle([
+    ('VALIGN', (0, 0), (-1, -1), 'TOP')
+])
+
+content.append(software_table)
+
+pdf.build(content)
