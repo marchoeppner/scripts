@@ -14,7 +14,7 @@ require 'progressbar'
 ### Get the script arguments and open relevant files
 options = OpenStruct.new()
 opts = OptionParser.new()
-opts.on("-s","--species", "=SPECIES","The species to use") {|argument| options.species = argument }
+opts.on("-s","--schema", "=SCHEMA","The schema to use") {|argument| options.schema = argument }
 opts.on("-d","--db", "=DB","Path to db file") {|argument| options.db = argument }
 opts.on("-o","--outfile", "=OUTFILE","Output file") {|argument| options.outfile = argument }
 opts.on("-h","--help","Display the usage information") {
@@ -28,37 +28,35 @@ options.db ? db_file = options.db : db_file = "/work_syn/ngs/projects/epitracker
 
 Epitracker::DBConnection.connect({database: db_file})
 
-species = Epitracker::Organism.find_by_name(options.species)
+schema = Epitracker::CgmlstSchema.find_by_name(options.schema)
 
 wd = Dir.getwd
 
-if !species
-    warn "Not a valid species, exiting..."
+if !schema
+    warn "Not a valid schema, exiting..."
     exit
 end
 
-s = File.new("samples.tsv", "w+")
-s.puts "sample\tassembly"
+s = File.new("profiles.tsv", "w+")
+s.puts "sample\tprofile"
 
-samples = species.samples
+profiles = schema.cgmlst_profiles
 
-pg = ProgressBar.create(:title => "Samples", :total => samples.length)
+pg = ProgressBar.create(:title => "Profiles", :total => profiles.length)
 
-species.samples.each do |sample|
+profiles.each do |profile|
 
     pg.increment
-
-    assembly = sample.assemblies.first
-
-    next unless assembly.cgmlst_profiles.empty?
-
-    text = assembly.fasta_unzip
     
-    f = File.new("#{sample.name}.fasta", "w+")
+    sample = profile.assembly.sample
+
+    text =  Zlib.inflate(Base64.decode64(profile.profile))
+    
+    f = File.new("#{sample.name}.tsv", "w+")
     f.puts text
     f.close
 
-    s.puts "#{sample.name}\t#{wd}/#{sample.name}.fasta"
+    s.puts "#{sample.name}\t#{wd}/#{sample.name}.tsv"
 
 end
 

@@ -38,10 +38,6 @@ def validate_bella_folder(folder)
         return false
     end
 
-    if Dir["#{folder}/chewbbaca/results_*/results_alleles.tsv"].empty?
-        return false
-    end
-
     if Dir["#{folder}/reportree/*dist_hamming.tsv"].empty?
         return false
     end
@@ -76,11 +72,12 @@ def get_cluster(partition, name)
 
 end
 
-def make_cgmlst_profile(sample, schema, alleles)
+def make_cgmlst_profile(sample, schema, data_file)
 
-    data = [ alleles[0] ]
-    data << alleles.find {|a| a.include?(sample.name)}
+    abort "No data file for #{sample.name}" if data_file.nil?
 
+    data = IO.readlines(data_file)
+    
     assembly = sample.assemblies.first
 
     profile = data.join
@@ -161,8 +158,17 @@ clusters = json["clusters"]
 tree = json["tree"]
 schema = json["schema"].split("/")[-1]
 
-alleles_file = Dir["#{options.input}/chewbbaca/results_*/results_alleles.tsv"].first
-alleles = IO.readlines(alleles_file)
+alleles = {}
+allele_files = Dir["#{options.input}/samples/*/chewbbaca/*results_alleles.tsv"]
+
+log.error "No alleles found!" if allele_files.empty?
+
+allele_files.each do |allele_file|
+
+    this_sample = File.basename(allele_file).gsub("_results_alleles.tsv", "")
+    alleles[this_sample] = File.expand_path(allele_file)
+
+end
 
 hamming_distance_file = Dir["#{options.input}/reportree/*dist_hamming.tsv"].first
 distances = compress_file(hamming_distance_file)
@@ -236,7 +242,7 @@ partitions.each do |part|
             log.info "Processing sample #{sample_name}.."
             sample = Epitracker::Sample.find_by_name(sample_name)
             if !sample
-                abort "Missing sample #{sample_name} in database!"
+                log.error "Missing sample #{sample_name} in database!"
             end
 
             cgmlst_profiles = sample.assemblies.first.cgmlst_profiles
@@ -244,7 +250,7 @@ partitions.each do |part|
             this_profile = cgmlst_profiles.find {|c| c.cgmlst_schema_id == cgmlst_schema.id }
             if !this_profile
                 log.info "Missing a cgMLST profile for #{sample_name} - building new one."
-                this_profile = make_cgmlst_profile(sample, cgmlst_schema, alleles)
+                this_profile = make_cgmlst_profile(sample, cgmlst_schema, alleles[sample_name])
             end
 
             # get existing cluster or create new one

@@ -9,6 +9,7 @@ require 'optparse'
 require 'ostruct'
 require 'json'
 require 'logger'
+require 'date'
 
 def make_folder(species)
     if !Dir.exist?(species)
@@ -29,15 +30,15 @@ opts.on("-h","--help","Display the usage information") {
 
 opts.parse! 
 
-pretend = true
+pretend = false
 
+wd = Dir.getwd
 # ------------
 # Logging
 # ------------
 
-this_date = DateTime.now.strftime("%d_%m_%Y_%H-%M")
 
-logfile = Logger.new("#{this_date}.log", "w+")
+logfile = Logger.new($stdout)
 logfile.level = Logger::INFO
 
 # Customize the log message format for file_logger (optional)
@@ -45,8 +46,8 @@ logfile.formatter = proc do |severity, datetime, progname, msg|
   "#{datetime.strftime('%Y-%m-%d %H:%M:%S')} [#{severity}] #{msg}\n"
 end
 
-console_logger = Logger.neW(STDERR
-console_logger.level = Logger::DEBUG)
+console_logger = Logger.new(STDERR)
+console_logger.level = Logger::DEBUG
 
 # ------------
 # Important variables
@@ -71,7 +72,7 @@ console_logger.info "Folder found, starting pre-flight check..."
 gabi_folder = Dir["#{options.input}/gabi_*"].first
 
 unless gabi_folder
-    msg "No GABI analysis found under given path! Exiting..."
+    msg = "No GABI analysis found under given path! Exiting..."
     console_logger.warn msg
     logfile.warn msg
     abort
@@ -157,7 +158,7 @@ data.each do |sample,species|
 
     console_logger.info "Sym-linking reads"
 
-    Dir.chdir(species) {
+    Dir.chdir("#{wd}/#{species}") {
         reads.each do |r|
             command = "ln -s #{r}"
             console_logger.info "Linking #{r}"
