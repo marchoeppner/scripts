@@ -79,7 +79,7 @@ parser.add_argument("--output")
 args = parser.parse_args()
 
 # Use defaults or take from command line
-outfile = args.output if args.output else "report.pdf"
+outfile = args.output if args.output else args.json.split("/")[-1].replace(".qc.json", ".pdf")
 
 content = []
 
@@ -95,6 +95,8 @@ styles.add(ParagraphStyle(name='H2', fontSize=12))
 
 styles.add(ParagraphStyle(name='H2_bg', backColor="#CCCCCC", borderPadding=4, fontSize=12))
 styles.add(ParagraphStyle(name='Standard', fontSize=10))
+styles.add(ParagraphStyle(name='table', fontSize=8))
+
 styles.add(ParagraphStyle(name='Gray', fontSize=10, textColor="#9c9c9c"))
 
 styles.add(ParagraphStyle(name='Bold', fontSize=10, fontName="Helvetica-Bold"))
@@ -103,7 +105,7 @@ styles.add(ParagraphStyle(name='Info', fontSize=8))
 styles.add(ParagraphStyle(name='Sequence', fontSize=8, fontName="Courier"))
 
 styles.add(ParagraphStyle(name='Status_pass', backColor="#72CC77", fontSize=10))
-styles.add(ParagraphStyle(name='Status_fail', backColor="#C04B42", fontSize=10))
+styles.add(ParagraphStyle(name='Status_fail', backColor="#D46860", fontSize=10))
 styles.add(ParagraphStyle(name='Status_warn', backColor="#CECB43", fontSize=10))
 styles.add(ParagraphStyle(name='Status_missing', fontSize=10))
 
@@ -145,10 +147,17 @@ taxon = data["taxon"]
 quast = data["quast"]
 amr_finder = data["amr"]["amrfinder"]
 amrs = sorted(amr_finder, key=lambda x: x['Gene symbol'])
+qc_warnings = qc["messages"]
+qc_pass = qc["pass"]
+qc_warn = qc["warn"]
+qc_fail = qc["fail"]
 
 mlst = data["mlst"]
 serotype = data["serotype"]
-plasmids = data["plasmids"]
+if "plasmids" in data:
+    plasmids = data["plasmids"]
+else:
+    plasmids = []
 coverage = data["mosdepth"]["total"]["mean"]
 coverage_status = get_status("coverage_total_mean", qc)
 
@@ -208,19 +217,36 @@ summary = []
 
 summary.append(["Untersuchte Probe", sample])
 summary.append(["Status der Sequenzierung", Paragraph(qc["call"], status_styles[qc["call"]])])
-summary.append(["Mittlere Sequenziertiefe", Paragraph(f"{coverage} X", status_styles[coverage_status])])
+summary.append(["Mittlere Sequenziertiefe", Paragraph(f"{coverage} X", styles["Normal"])])
 summary.append(["Ermitteltes Taxon", f"{taxon}"])
 summary.append(["Assemblygröße (Mb)", Paragraph(f"{assembly_size}", styles["Normal"])])
 summary.append(["Contigs > 1kb", quast["# contigs (>= 1000 bp)"]])
 summary.append(["Plasmide", f"{len(plasmids)}"])
 if (mlst):
-    summary.append(["MLST Typ / Schema", f"{mlst['sequence_type']} ({mlst['scheme']})"])
+    summary.append(["MLST Typ (Schema)", f"{mlst['sequence_type']} ({mlst['scheme']})"])
 
 if (len(serotypes) > 0):
     this_sero = get_serotype(serotypes)
-    summary.append(["Serotyp", f"{this_sero['serotype']} ({this_sero['tool']})"])
+    summary.append(["Serotyp (Software)", f"{this_sero['serotype']} ({this_sero['tool']})"])
     if (this_sero["pathotype"]):
         summary.append(["Pathotyp", this_sero["pathotype"]])
+
+confindr = data["confindr"]
+
+if "illumina" in confindr:
+    confindr_illumina = data["confindr"]["illumina"][0][0]
+
+    if "confindr_illumina" in qc_fail:
+        contam_info = "inter-species" if ":" in confindr_illumina["Genus"] else confindr_illumina["NumContamSNVs"]
+        summary.append(["Kontamination (Sequenzen)", contam_info])
+
+if "taxonkit_genus_fraction" in qc_fail:
+
+    taxkit = data["taxonkit"]["species"][1]
+    majority_genus = taxkit["species"]
+    majority_fraction = round(taxkit["fraction"] * 100, 2)
+    summary.append(["Kontamination (Assembly)", f"{majority_genus} ({majority_fraction} %)"])
+
 
 summary.append(["Datum der Auswertung", run_date])
 
@@ -234,6 +260,8 @@ summary_table.setStyle([
 content.append(summary_table)
 
 content.append(Spacer(1, 20))
+
+content.append(PageBreak())
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Assembly Metriken
@@ -274,7 +302,7 @@ busco_duplication_status = get_status("busco_duplicates", qc)
 quast_metrics.append(["BUSCO Gene vollständig (%)", Paragraph(f"{busco_completeness}", status_styles[busco_complete_status])])
 quast_metrics.append(["BUSCO Gene dupliziert (%)", Paragraph(f"{busco_duplication}", status_styles[busco_duplication_status])])
 
-quast_metrics_table = Table(quast_metrics, colWidths=[6 * cm, 4 * cm], splitByRow=1, hAlign='LEFT')
+quast_metrics_table = Table(quast_metrics, colWidths=[8 * cm, 4 * cm], splitByRow=1, hAlign='LEFT')
 
 quast_metrics_table.setStyle([
     ('LINEABOVE', (0, 1), (-1, -1), 0.25, colors.black),
@@ -283,7 +311,37 @@ quast_metrics_table.setStyle([
 
 content.append(quast_metrics_table)
 
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# QC Metriken
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+content.append(Spacer(1, 20))
+content.append(Paragraph("Qualitätskontrolle", styles["H2_bg"]))
+content.append(Spacer(1, 10))
+
+qc_entries = [[Paragraph("Metrik", styles["Bold"]), Paragraph("Status", styles["Bold"])]]
+
+for item in sorted(qc_pass):
+    qc_entries.append([Paragraph(item, styles["Bold"]), Paragraph("Pass", status_styles["pass"])])
+
+
+for item in sorted(qc_warn):
+    qc_entries.append([Paragraph(item, styles["Bold"]), Paragraph("Warn", status_styles["warn"])])
+
+for item in sorted(qc_fail):
+    qc_entries.append([Paragraph(item, styles["Bold"]), Paragraph("Fail", status_styles["fail"])])
+
+qc_table = Table(qc_entries, colWidths=[8 * cm, 4 * cm], splitByRow=1, hAlign='LEFT')
+
+qc_table.setStyle([
+    ('LINEABOVE', (0, 1), (-1, -1), 0.25, colors.black),
+    ('VALIGN', (0, 0), (-1, -1), 'TOP')
+])
+
+content.append(qc_table)
+
 content.append(PageBreak())
+
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Charakterisierung
@@ -310,27 +368,6 @@ content.append(characterization_table)
 content.append(PageBreak())
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# QC Metriken
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-content.append(Spacer(1, 20))
-content.append(Paragraph("Qualitätskontrolle", styles["H2_bg"]))
-content.append(Spacer(1, 10))
-
-qc_warnings = qc["messages"]
-
-qc_entries = []
-
-busco = data["busco"]
-busco_score = busco["one_line_summary"]
-busco_status = get_status("busco_completeness", qc)
-
-confindr = data["confindr"]
-confindr_statutus = get_status("confindr_illumina", qc)
-
-content.append(PageBreak())
-
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Pipeline Einstellungen
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -340,12 +377,14 @@ content.append(Spacer(1, 10))
 software = []
 for key, values in settings.items():
     if type(values) is not dict:
-        software.append([key, Paragraph(str(values), styles["Normal"])])
+        software.append([key, Paragraph(str(values), styles["table"])])
 
 software_table = Table(software, colWidths=[7 * cm, 8 * cm], splitByRow=1, hAlign='LEFT')
 
 software_table.setStyle([
-    ('VALIGN', (0, 0), (-1, -1), 'TOP')
+    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+    ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
+    ('TOPPADDING', (0, 0), (-1, -1), 1)
 ])
 
 content.append(software_table)
