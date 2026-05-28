@@ -96,6 +96,8 @@ styles.add(ParagraphStyle(name='H2', fontSize=12))
 styles.add(ParagraphStyle(name='H2_bg', backColor="#CCCCCC", borderPadding=4, fontSize=12))
 styles.add(ParagraphStyle(name='Standard', fontSize=10))
 styles.add(ParagraphStyle(name='table', fontSize=8))
+styles.add(ParagraphStyle(name='Taxon', fontSize=10, fontName="Helvetica"))
+
 
 styles.add(ParagraphStyle(name='Gray', fontSize=10, textColor="#9c9c9c"))
 
@@ -161,12 +163,18 @@ else:
 coverage = data["mosdepth"]["total"]["mean"]
 coverage_status = get_status("coverage_total_mean", qc)
 
+coverage_illumina = data["mosdepth"]["illumina"]["mean"]
+
+q30_rate = round(data["fastp"]["summary"]["before_filtering"]["q30_rate"], 2)*100
+read_length = data["fastp"]["read1_before_filtering"]["total_cycles"]
+insert_size = data["fastp"]["insert_size"]["peak"]
+total_bases = round(data["fastp"]["read1_before_filtering"]["total_bases"]/1000000, 0)
 assembly_size = round(float(quast["Total length"] / 1000000), 3)
 
 ##############################
 # PDF construction starts here
 ##############################
-disclaimer = f"Anlage zum Prüfbericht {sample}"
+disclaimer = f"Anlage zur Gesamtgenome-Sequenzierung von {sample}"
 
 content.append(Paragraph(disclaimer, styles["Normal"]))
 content.append(Spacer(1, 12))
@@ -217,8 +225,8 @@ summary = []
 
 summary.append(["Untersuchte Probe", sample])
 summary.append(["Status der Sequenzierung", Paragraph(qc["call"], status_styles[qc["call"]])])
-summary.append(["Mittlere Sequenziertiefe", Paragraph(f"{coverage} X", styles["Normal"])])
-summary.append(["Ermitteltes Taxon", f"{taxon}"])
+summary.append(["Mittlere Sequenziertiefe", Paragraph(f"{coverage_illumina} X", styles["Normal"])])
+summary.append(["Ermitteltes Taxon", Paragraph(f"<i>{taxon}</i>", styles["Taxon"])])
 summary.append(["Assemblygröße (Mb)", Paragraph(f"{assembly_size}", styles["Normal"])])
 summary.append(["Contigs > 1kb", quast["# contigs (>= 1000 bp)"]])
 summary.append(["Plasmide", f"{len(plasmids)}"])
@@ -261,6 +269,36 @@ content.append(summary_table)
 
 content.append(Spacer(1, 20))
 
+# ~~~~~~~~~~~~~~~~~~~~~~~
+# Rohdaten Metriken
+# ~~~~~~~~~~~~~~~~~~~~~~~
+
+content.append(Paragraph("Rohdaten Metriken", styles["H2_bg"]))
+content.append(Spacer(1, 10))
+
+info = "Metriken zur Beschreibung der verwendeten Rohdaten"
+
+content.append(Paragraph(info, styles["Info"]))
+content.append(Spacer(1, 10))
+
+raw_data = []
+raw_data = [[Paragraph("Metrik", styles["Bold"]), Paragraph("Wert", styles["Bold"])]]
+
+raw_data.append(["Readlänge (Basen)", Paragraph(f"{read_length}", styles["Normal"])])
+raw_data.append(["Basenmenge (Millionen)", Paragraph(f"{total_bases}", styles["Normal"])])
+raw_data.append(["Mittlere Sequenziertiefe (X)", Paragraph(f"{coverage_illumina}", styles["Normal"])])
+raw_data.append(["Anteil Q30 Basen (%)", Paragraph(f"{q30_rate}", styles["Normal"])])
+raw_data.append(["Mittlere Fragmentgröße (Basen)", Paragraph(f"{insert_size}", styles["Normal"])])
+
+raw_data_table = Table(raw_data, colWidths=[7 * cm, 8 * cm], splitByRow=1, hAlign='LEFT')
+
+raw_data_table.setStyle([
+    ('LINEABOVE', (0, 1), (-1, -1), 0.25, colors.black),
+    ('VALIGN', (0, 0), (-1, -1), 'TOP')
+])
+
+content.append(raw_data_table)
+
 content.append(PageBreak())
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -287,7 +325,7 @@ for key in quast_keys:
     status_key = qc_lookups[key] if key in qc_lookups else None
     qc_status = get_status(status_key, qc) if status_key else "missing"
 
-    quast_metrics.append([Paragraph(translation, styles["Normal"]), Paragraph(f"{value}", status_styles[qc_status])])
+    quast_metrics.append([Paragraph(translation, styles["Normal"]), Paragraph(f"{value}", styles["Normal"])])
 
 busco = data["busco"]
 busco_total = int(busco["dataset_total_buscos"])
@@ -299,8 +337,8 @@ busco_duplication = round(float(busco_duplicates / busco_total), 2) * 100
 busco_complete_status = get_status("busco_completeness", qc)
 busco_duplication_status = get_status("busco_duplicates", qc)
 
-quast_metrics.append(["BUSCO Gene vollständig (%)", Paragraph(f"{busco_completeness}", status_styles[busco_complete_status])])
-quast_metrics.append(["BUSCO Gene dupliziert (%)", Paragraph(f"{busco_duplication}", status_styles[busco_duplication_status])])
+quast_metrics.append(["BUSCO Gene vollständig (%)", Paragraph(f"{busco_completeness}", styles["Normal"])])
+quast_metrics.append(["BUSCO Gene dupliziert (%)", Paragraph(f"{busco_duplication}", styles["Normal"])])
 
 quast_metrics_table = Table(quast_metrics, colWidths=[8 * cm, 4 * cm], splitByRow=1, hAlign='LEFT')
 
@@ -316,20 +354,20 @@ content.append(quast_metrics_table)
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 content.append(Spacer(1, 20))
-content.append(Paragraph("Qualitätskontrolle", styles["H2_bg"]))
+content.append(Paragraph("Interne Qualitätsmetriken", styles["H2_bg"]))
 content.append(Spacer(1, 10))
 
 qc_entries = [[Paragraph("Metrik", styles["Bold"]), Paragraph("Status", styles["Bold"])]]
 
 for item in sorted(qc_pass):
-    qc_entries.append([Paragraph(item, styles["Bold"]), Paragraph("Pass", status_styles["pass"])])
+    qc_entries.append([Paragraph(item, styles["Normal"]), Paragraph("Pass", status_styles["pass"])])
 
 
 for item in sorted(qc_warn):
-    qc_entries.append([Paragraph(item, styles["Bold"]), Paragraph("Warn", status_styles["warn"])])
+    qc_entries.append([Paragraph(item, styles["Normal"]), Paragraph("Warn", status_styles["warn"])])
 
 for item in sorted(qc_fail):
-    qc_entries.append([Paragraph(item, styles["Bold"]), Paragraph("Fail", status_styles["fail"])])
+    qc_entries.append([Paragraph(item, styles["Normal"]), Paragraph("Fail", status_styles["fail"])])
 
 qc_table = Table(qc_entries, colWidths=[8 * cm, 4 * cm], splitByRow=1, hAlign='LEFT')
 
