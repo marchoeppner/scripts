@@ -208,7 +208,7 @@ illumina_contam_info = ""
 
 if confindr["illumina"] and len(confindr["illumina"][0]) > 0:
     confindr_illumina = data["confindr"]["illumina"][0][0]
-    illumina_contam_info = "inter-species" if ":" in confindr_illumina["Genus"] else f"Kontaminiertende SNVs: {confindr_illumina['NumContamSNVs']}"
+    illumina_contam_info = "inter-species" if ":" in confindr_illumina["Genus"] else f"Kontaminierende SNVs: {confindr_illumina['NumContamSNVs']}"
 
 ##############################
 # PDF construction starts here
@@ -219,6 +219,7 @@ content.append(Paragraph(disclaimer, styles["Normal"]))
 content.append(Spacer(1, 12))
 
 header = "Bericht zur Gesamtgenom-Sequenzierung mittels NGS (M-2448)"
+page_header = f"{sample} - {header}"
 
 content.append(Paragraph(header, styles["H1"]))
 content.append(Spacer(1, 12))
@@ -333,9 +334,9 @@ content.append(raw_data_table)
 
 content.append(PageBreak())
 
-content.append(Paragraph(header, styles["header"]))
+content.append(Spacer(1, 20))
+content.append(Paragraph(page_header, styles["header"]))
 content.append(Spacer(1, 10))
-
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Assembly Metriken
@@ -459,12 +460,14 @@ content.append(Spacer(1, 20))
 
 content.append(PageBreak())
 
+content.append(Spacer(1, 20))
+content.append(Paragraph(page_header, styles["header"]))
+content.append(Spacer(1, 10))
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Charakterisierung
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-content.append(Spacer(1, 20))
 content.append(Paragraph("Resistenz- und Virulenzgene (nicht akkreditiert)", styles["H2_bg"]))
 content.append(Spacer(1, 10))
 
@@ -484,6 +487,10 @@ content.append(characterization_table)
 content.append(Spacer(1, 20))
 
 content.append(PageBreak())
+
+content.append(Spacer(1, 20))
+content.append(Paragraph(page_header, styles["header"]))
+content.append(Spacer(1, 10))
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Pipeline Einstellungen
