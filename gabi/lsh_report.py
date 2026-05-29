@@ -271,11 +271,11 @@ summary.append(["Assemblygröße (Mb)", Paragraph(f"{assembly_size}", styles["No
 summary.append(["Contigs > 1kb", quast["# contigs (>= 1000 bp)"]])
 summary.append(["Plasmide", f"{len(plasmids)}"])
 if (mlst):
-    summary.append(["MLST Typ (Schema)", f"{mlst['sequence_type']} ({mlst['scheme']})"])
+    summary.append(["MLST Typ (Schema)**", f"{mlst['sequence_type']} ({mlst['scheme']})"])
 
 if (len(serotypes) > 0):
     this_sero = get_serotype(serotypes)
-    summary.append(["Serotyp (Software)", f"{this_sero['serotype']} ({this_sero['tool']})"])
+    summary.append(["Serotyp (Software)**", f"{this_sero['serotype']} ({this_sero['tool']})"])
     if (this_sero["pathotype"]):
         summary.append(["Pathotyp", this_sero["pathotype"]])
 
@@ -298,7 +298,9 @@ summary_table.setStyle([
 content.append(summary_table)
 content.append(Spacer(1, 20))
 
-content.append(Paragraph(f"* <b>pass</b>: keine Beanstandungen, <b>warn</b>: Wert(e) leicht außerhalb der Norm, <b>fail</b>: Wert(e) außerhalb der Norm, Probe kann ggf. nicht verwendet werden", styles["Normal"]))
+content.append(Paragraph(f"* <b>pass</b>: keine Beanstandungen, <b>warn</b>: Wert(e) leicht außerhalb der Norm, <b>fail</b>: Wert(e) außerhalb der Norm, Probe kann ggf. nicht verwendet werden", styles["Info"]))
+content.append(Spacer(1, 5))
+content.append(Paragraph(f"** Nicht Teil der Validierung/Akkreditierung der Methode.", styles["Info"]))
 content.append(Spacer(1, 20))
 
 
@@ -428,7 +430,7 @@ content.append(Spacer(1, 20))
 content.append(Paragraph("Interne Qualitätsmetriken", styles["H2_bg"]))
 content.append(Spacer(1, 10))
 
-info = "Interne Metriken zur Erfassung und Evaluierung unterschiedlicher Schwellenwerte"
+info = "Pipeline-interne Schwellenwerte und Klassifikation"
 
 content.append(Paragraph(info, styles["Info"]))
 content.append(Spacer(1, 10))
@@ -455,7 +457,7 @@ qc_table.setStyle([
 content.append(qc_table)
 content.append(Spacer(1, 20))
 
-content.append(Paragraph(f"* <b>pass</b>: keine Beanstandungen, <b>warn</b>: Wert(e) leicht außerhalb der Norm, <b>fail</b>: Wert(e) außerhalb der Norm, Probe kann ggf. nicht verwendet werden", styles["Normal"]))
+content.append(Paragraph(f"* <b>pass</b>: keine Beanstandungen, <b>warn</b>: Wert(e) leicht außerhalb der Norm, <b>fail</b>: Wert(e) außerhalb der Norm, Probe kann ggf. nicht verwendet werden", styles["Info"]))
 content.append(Spacer(1, 20))
 
 content.append(PageBreak())
