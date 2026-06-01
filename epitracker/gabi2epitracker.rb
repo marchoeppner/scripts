@@ -44,6 +44,7 @@ opts.on("-i","--input", "=INPUT","Path to GABI results folder") {|argument| opti
 opts.on("-d","--db", "=DB","Path to db file") {|argument| options.db = argument }
 opts.on("-t","--date", "=DATE","Creation date to use") {|argument| options.date = argument }
 opts.on("-o","--outfile", "=OUTFILE","Output file") {|argument| options.outfile = argument }
+opts.on("-r","--[no-]remove", "Remove samples from database") {|argument| options.remove = argument }
 opts.on("-h","--help","Display the usage information") {
     puts opts
     exit
@@ -93,128 +94,147 @@ if !failed.empty?
     end
 end
 
-pg = ProgressBar.create(:title => "Jsons", :total => jsons.length)
+if options.remove
 
-jsons.each do |json|
+    warn "Removing samples..."
+    jsons.each do |json|
+        name = json["sample"]
+        sample = Epitracker::Sample.find_by_name(name)
+        if sample
+            assemblies = sample.assemblies
+            assemblies.each do |a|
+                a.assembly_info.delete
+                a.delete
+            end
+            sample.delete
+        end
 
-    pg.increment
-    next if json["qc"]["status"] == "failed"
-
-    genus,species = json["taxon"].split(" ")
-
-    date_string = json["date"]
-    if analysis_date.nil?
-        analysis_date = Date.parse(date_string)
     end
 
-    if genus.nil? || species.nil?
-        warn "Species name not following genus/species convention (was: #{genus} #{species})"
-        exit
-    end
+else 
+    pg = ProgressBar.create(:title => "Jsons", :total => jsons.length)
 
-    sample = json["sample"]
-    version = json["software"]["Workflow"]["bio-raum/gabi"]
+    jsons.each do |json|
 
-    o = Epitracker::Organism.where(genus: genus, species: species).first
+        pg.increment
+        next if json["qc"]["status"] == "failed"
 
-    if !o
-        warn "Taxon #{genus} #{species} not found in database!"
-        next
-    end
+        genus,species = json["taxon"].split(" ")
 
-    assembly = assemblies.find {|a| a.include?(sample)}
+        date_string = json["date"]
+        if analysis_date.nil?
+            analysis_date = Date.parse(date_string)
+        end
 
-    if !assembly
-        warn "No assembly found for sample #{sample}"
-        exit
-    end
+        if genus.nil? || species.nil?
+            warn "Species name not following genus/species convention (was: #{genus} #{species})"
+            exit
+        end
 
-    s = Epitracker::Sample.find_by_name(sample)
+        sample = json["sample"]
+        version = json["software"]["Workflow"]["bio-raum/gabi"]
 
-    if s
-        warn "Sample #{sample} already in the database, skiping!"
-    else
-        payload = {
-            "organism_id" => o.id,
-            "name" => sample,
-            "created_at" => analysis_date
-        }
-        s = Epitracker::Sample.create(payload)
+        o = Epitracker::Organism.where(genus: genus, species: species).first
 
-        fasta = IO.readlines(assembly).join
-        compressed_fasta = Zlib::Deflate.deflate(fasta)
-        encoded_fasta = Base64.encode64(compressed_fasta)
-        md5 = Digest::MD5.hexdigest(fasta)
+        if !o
+            warn "Taxon #{genus} #{species} not found in database!"
+            next
+        end
 
-        payload = {
-            "sample_id" => s.id,
-            "fasta" => encoded_fasta,
-            "fasta_md5" => md5,
-            "pipeline" => "GABI",
-            "pipeline_version" => version,
-            "created_at" => analysis_date
-        }
+        assembly = assemblies.find {|a| a.include?(sample)}
 
-        a = Epitracker::Assembly.create(payload)
+        if !assembly
+            warn "No assembly found for sample #{sample}"
+            exit
+        end
 
-        serotype = nil
-        n50 = nil
-        n_scaffolds= nil
-        qc = nil
-        mlst_type = nil
-        mlst_schema = nil
-        pathotype = nil
-        busco = nil
+        s = Epitracker::Sample.find_by_name(sample)
 
-        if json["serotype"] && json["serotype"].length > 0
-            serodata = json["serotype"]
-            serodata.each do |tool,sd|
-                if sd["Pathotype"]
-                    pathotype = sd["Pathotype"]
-                end
-                if sd["Serotype"]
-                    serotype = sd["Serotype"]
-                elsif sd["SEROTYPE"]
-                    serotype = sd["SEROTYPE"]
-                elsif sd["Predicted serotype"]
-                    serotype = sd["Predicted serotype"]
+        if s
+            warn "Sample #{sample} already in the database, skiping!"
+        else
+            payload = {
+                "organism_id" => o.id,
+                "name" => sample,
+                "created_at" => analysis_date
+            }
+            s = Epitracker::Sample.create(payload)
+
+            fasta = IO.readlines(assembly).join
+            compressed_fasta = Zlib::Deflate.deflate(fasta)
+            encoded_fasta = Base64.encode64(compressed_fasta)
+            md5 = Digest::MD5.hexdigest(fasta)
+
+            payload = {
+                "sample_id" => s.id,
+                "fasta" => encoded_fasta,
+                "fasta_md5" => md5,
+                "pipeline" => "GABI",
+                "pipeline_version" => version,
+                "created_at" => analysis_date
+            }
+
+            a = Epitracker::Assembly.create(payload)
+
+            serotype = nil
+            n50 = nil
+            n_scaffolds= nil
+            qc = nil
+            mlst_type = nil
+            mlst_schema = nil
+            pathotype = nil
+            busco = nil
+
+            if json["serotype"] && json["serotype"].length > 0
+                serodata = json["serotype"]
+                serodata.each do |tool,sd|
+                    if sd["Pathotype"]
+                        pathotype = sd["Pathotype"]
+                    end
+                    if sd["Serotype"]
+                        serotype = sd["Serotype"]
+                    elsif sd["SEROTYPE"]
+                        serotype = sd["SEROTYPE"]
+                    elsif sd["Predicted serotype"]
+                        serotype = sd["Predicted serotype"]
+                    end
                 end
             end
-        end
 
-        if json["mlst"] && json["mlst"].length > 0
-            mdata = json["mlst"].first
-            mlst_schema = mdata["scheme"]
-            mlst_type = mdata["sequence_type"]
-        end
+            if json["mlst"] && json["mlst"].length > 0
+                mdata = json["mlst"].first
+                mlst_schema = mdata["scheme"]
+                mlst_type = mdata["sequence_type"]
+            end
 
-        qc = json["qc"]["call"]
+            qc = json["qc"]["call"]
 
-        n50 = json["quast"]["N50"]
-        n_scaffolds = json["quast"]["# contigs"]
-        assembly_size = json["quast"]["Total length"]
+            n50 = json["quast"]["N50"]
+            n_scaffolds = json["quast"]["# contigs"]
+            assembly_size = json["quast"]["Total length"]
 
-        busco = json["busco"]["one_line_summary"]
+            busco = json["busco"]["one_line_summary"]
 
-        payload = {
-            "assembly_id" => a.id,
-            "serotype" => serotype,
-            "n50" => n50,
-            "n_scaffolds" => n_scaffolds,
-            "qc" => qc,
-            "mlst_type" => mlst_type,
-            "mlst_schema" => mlst_schema,
-            "pathotype" => pathotype,
-            "busco" => busco,
-            "assembly_size" => assembly_size,
-            "created_at" => analysis_date
-        }
+            payload = {
+                "assembly_id" => a.id,
+                "serotype" => serotype,
+                "n50" => n50,
+                "n_scaffolds" => n_scaffolds,
+                "qc" => qc,
+                "mlst_type" => mlst_type,
+                "mlst_schema" => mlst_schema,
+                "pathotype" => pathotype,
+                "busco" => busco,
+                "assembly_size" => assembly_size,
+                "created_at" => analysis_date
+            }
 
-        i = Epitracker::AssemblyInfo.create(payload)
-
+            i = Epitracker::AssemblyInfo.create(payload)
             
+        end
+
     end
 
-end
+    pg.finish
 
-pg.finish
+end

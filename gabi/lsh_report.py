@@ -44,12 +44,13 @@ def get_serotype(serotypes):
             if (data["mecA"] == "+"):
                 result["genes"] = "mecA"
         elif (tool == "ectyper"):
-            result["tool"] = tool
-            result["serotype"] = data["Serotype"]
             result["genes"] = data["PathotypeGenes"]
             if "ND" not in data["Pathotype"]:
                 result["pathotype"] = data["Pathotype"]
             result["classification"] = data["StxSubtypes"]
+        elif (tool == "ecoh"):
+            result["serotype"] = data["serotype"]
+            result["tool"] = tool
         elif (tool == "sistr"):
             result["tool"] = tool
             result["serotype"] = data["serogroup"]
@@ -228,8 +229,14 @@ if (mlst):
 if (len(serotypes) > 0):
     this_sero = get_serotype(serotypes)
     summary.append(["Serotyp (Software)", f"{this_sero['serotype']} ({this_sero['tool']})"])
-    if (this_sero["pathotype"]):
+    if ("pathotype" in this_sero):
         summary.append(["Pathotyp", this_sero["pathotype"]])
+
+    if ("genes" in this_sero):
+        summary.append(["Virulenzgene", this_sero["genes"]])
+
+    if ("classification" in this_sero):
+        summary.append(["STX Typ", this_sero["classification"]])
 
 confindr = data["confindr"]
 
@@ -322,14 +329,14 @@ content.append(Spacer(1, 10))
 qc_entries = [[Paragraph("Metrik", styles["Bold"]), Paragraph("Status", styles["Bold"])]]
 
 for item in sorted(qc_pass):
-    qc_entries.append([Paragraph(item, styles["Bold"]), Paragraph("Pass", status_styles["pass"])])
+    qc_entries.append([Paragraph(item, styles["Normal"]), Paragraph("Pass", status_styles["pass"])])
 
 
 for item in sorted(qc_warn):
-    qc_entries.append([Paragraph(item, styles["Bold"]), Paragraph("Warn", status_styles["warn"])])
+    qc_entries.append([Paragraph(item, styles["Normal"]), Paragraph("Warn", status_styles["warn"])])
 
 for item in sorted(qc_fail):
-    qc_entries.append([Paragraph(item, styles["Bold"]), Paragraph("Fail", status_styles["fail"])])
+    qc_entries.append([Paragraph(item, styles["Normal"]), Paragraph("Fail", status_styles["fail"])])
 
 qc_table = Table(qc_entries, colWidths=[8 * cm, 4 * cm], splitByRow=1, hAlign='LEFT')
 
@@ -379,7 +386,7 @@ for key, values in settings.items():
     if type(values) is not dict:
         software.append([key, Paragraph(str(values), styles["table"])])
 
-software_table = Table(software, colWidths=[7 * cm, 8 * cm], splitByRow=1, hAlign='LEFT')
+software_table = Table(software, colWidths=[7 * cm, 10 * cm], splitByRow=1, hAlign='LEFT')
 
 software_table.setStyle([
     ('VALIGN', (0, 0), (-1, -1), 'TOP'),
