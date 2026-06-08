@@ -94,9 +94,14 @@ styles.add(ParagraphStyle(name='Justify', alignment=TA_JUSTIFY))
 styles.add(ParagraphStyle(name='H1', fontSize=14))
 styles.add(ParagraphStyle(name='H2', fontSize=12))
 
+styles.add(ParagraphStyle(name='header', fontSize=8))
+
+
 styles.add(ParagraphStyle(name='H2_bg', backColor="#CCCCCC", borderPadding=4, fontSize=12))
 styles.add(ParagraphStyle(name='Standard', fontSize=10))
 styles.add(ParagraphStyle(name='table', fontSize=8))
+styles.add(ParagraphStyle(name='Taxon', fontSize=10, fontName="Helvetica"))
+
 
 styles.add(ParagraphStyle(name='Gray', fontSize=10, textColor="#9c9c9c"))
 
@@ -133,6 +138,9 @@ logo.hAlign = "RIGHT"
 content.append(logo)
 content.append(Spacer(1, 20))
 
+has_illumina = False
+has_nanopore = False
+
 ##############################
 # Parse JSON
 ##############################
@@ -153,26 +161,66 @@ qc_pass = qc["pass"]
 qc_warn = qc["warn"]
 qc_fail = qc["fail"]
 
+taxkit = data["taxonkit"]
+taxkit_majority = taxkit["species"][0]
+majority_species = taxkit_majority["species"]
+majority_fraction = round(taxkit_majority["fraction"] * 100, 2)
+minority_species = False
+minority_fraction = False
+
+if len(taxkit["species"]) > 1:
+    taxkit_minority = taxkit["species"][1]
+    if taxkit_minority["fraction"] >= 5.0:
+        minority__species = taxkit["species"][1]
+        minority_fraction = round(taxkit_minority["fraction"] * 100, 2)
+
 mlst = data["mlst"]
 serotype = data["serotype"]
 if "plasmids" in data:
     plasmids = data["plasmids"]
 else:
     plasmids = []
+
 coverage = data["mosdepth"]["total"]["mean"]
 coverage_status = get_status("coverage_total_mean", qc)
 
-assembly_size = round(float(quast["Total length"] / 1000000), 3)
+if "illumina" in data["mosdepth"]:
+    coverage_illumina = data["mosdepth"]["illumina"]["mean"]
+else:
+    coverage_illumina = None
+
+if "fastp" in data:
+    has_illumina = True
+    q30_rate = round(data["fastp"]["summary"]["before_filtering"]["q30_rate"], 2)*100
+    read_length = data["fastp"]["read1_before_filtering"]["total_cycles"]
+    insert_size = data["fastp"]["insert_size"]["peak"]
+    total_bases = round(data["fastp"]["read1_before_filtering"]["total_bases"]/1000000, 0)
+    assembly_size = round(float(quast["Total length"] / 1000000), 3)
+else:
+    q30_rate = None
+    read_length = None
+    insert_size = None
+    total_bases = None
+    assembly_size = None
+
+confindr = data["confindr"]
+
+illumina_contam_info = ""
+
+if confindr["illumina"] and len(confindr["illumina"][0]) > 0:
+    confindr_illumina = data["confindr"]["illumina"][0][0]
+    illumina_contam_info = "inter-species" if ":" in confindr_illumina["Genus"] else f"Kontaminierende SNVs: {confindr_illumina['NumContamSNVs']}"
 
 ##############################
 # PDF construction starts here
 ##############################
-disclaimer = f"Anlage zum Prüfbericht {sample}"
+disclaimer = f"Anlage zur Gesamtgenome-Sequenzierung von {sample}"
 
 content.append(Paragraph(disclaimer, styles["Normal"]))
 content.append(Spacer(1, 12))
 
 header = "Bericht zur Gesamtgenom-Sequenzierung mittels NGS (M-2448)"
+page_header = f"{sample} - {header}"
 
 content.append(Paragraph(header, styles["H1"]))
 content.append(Spacer(1, 12))
@@ -217,26 +265,27 @@ serotypes = data["serotype"]
 summary = []
 
 summary.append(["Untersuchte Probe", sample])
-summary.append(["Status der Sequenzierung", Paragraph(qc["call"], status_styles[qc["call"]])])
-summary.append(["Mittlere Sequenziertiefe", Paragraph(f"{coverage} X", styles["Normal"])])
-summary.append(["Ermitteltes Taxon", f"{taxon}"])
+summary.append(["Status der Sequenzierung*", Paragraph(qc["call"], status_styles[qc["call"]])])
+summary.append(["Sequenziertechnologie", Paragraph("Illumina (MiSeq)", styles["Normal"])])
+summary.append(["Mittlere Sequenziertiefe", Paragraph(f"{coverage_illumina} X", styles["Normal"])])
+summary.append(["Ermitteltes Taxon", Paragraph(f"<i>{taxon}</i>", styles["Taxon"])])
 summary.append(["Assemblygröße (Mb)", Paragraph(f"{assembly_size}", styles["Normal"])])
 summary.append(["Contigs > 1kb", quast["# contigs (>= 1000 bp)"]])
 summary.append(["Plasmide", f"{len(plasmids)}"])
 if (mlst):
-    summary.append(["MLST Typ (Schema)", f"{mlst['sequence_type']} ({mlst['scheme']})"])
+    summary.append(["MLST Typ (Schema)**", f"{mlst['sequence_type']} ({mlst['scheme']})"])
 
 if (len(serotypes) > 0):
     this_sero = get_serotype(serotypes)
-    summary.append(["Serotyp (Software)", f"{this_sero['serotype']} ({this_sero['tool']})"])
+    summary.append(["Serotyp (Software)**", f"{this_sero['serotype']} ({this_sero['tool']})"])
     if ("pathotype" in this_sero):
-        summary.append(["Pathotyp", this_sero["pathotype"]])
+        summary.append(["Pathotyp**", this_sero["pathotype"]])
 
     if ("genes" in this_sero):
-        summary.append(["Virulenzgene", this_sero["genes"]])
+        summary.append(["Virulenzgene**", this_sero["genes"]])
 
     if ("classification" in this_sero):
-        summary.append(["STX Typ", this_sero["classification"]])
+        summary.append(["STX Typ**", this_sero["classification"]])
 
 confindr = data["confindr"]
 
@@ -249,11 +298,7 @@ if "illumina" in confindr:
 
 if "taxonkit_genus_fraction" in qc_fail:
 
-    taxkit = data["taxonkit"]["species"][1]
-    majority_genus = taxkit["species"]
-    majority_fraction = round(taxkit["fraction"] * 100, 2)
     summary.append(["Kontamination (Assembly)", f"{majority_genus} ({majority_fraction} %)"])
-
 
 summary.append(["Datum der Auswertung", run_date])
 
@@ -265,10 +310,49 @@ summary_table.setStyle([
 ])
 
 content.append(summary_table)
-
 content.append(Spacer(1, 20))
 
+content.append(Paragraph(f"* <b>pass</b>: keine Beanstandungen, <b>warn</b>: Wert(e) leicht außerhalb der Norm, <b>fail</b>: Wert(e) außerhalb der Norm, Probe kann ggf. nicht verwendet werden", styles["Info"]))
+content.append(Spacer(1, 5))
+content.append(Paragraph(f"** Nicht Teil der Validierung/Akkreditierung der Methode.", styles["Info"]))
+content.append(Spacer(1, 20))
+
+
+# ~~~~~~~~~~~~~~~~~~~~~~~
+# Rohdaten Metriken
+# ~~~~~~~~~~~~~~~~~~~~~~~
+
+content.append(Paragraph("Rohdaten Metriken", styles["H2_bg"]))
+content.append(Spacer(1, 10))
+
+info = "Metriken zur Beschreibung der verwendeten Rohdaten"
+
+content.append(Paragraph(info, styles["Info"]))
+content.append(Spacer(1, 10))
+
+raw_data = []
+raw_data = [[Paragraph("Metrik", styles["Bold"]), Paragraph("Wert", styles["Bold"])]]
+
+raw_data.append(["Readlänge (Basen)", Paragraph(f"2x{read_length}", styles["Normal"])])
+raw_data.append(["Basenmenge (Millionen)", Paragraph(f"{total_bases}", styles["Normal"])])
+raw_data.append(["Mittlere Sequenziertiefe (X)", Paragraph(f"{coverage_illumina}", styles["Normal"])])
+raw_data.append(["Anteil Q30 Basen (%)", Paragraph(f"{q30_rate}", styles["Normal"])])
+raw_data.append(["Mittlere Fragmentgröße (Basen)", Paragraph(f"{insert_size}", styles["Normal"])])
+
+raw_data_table = Table(raw_data, colWidths=[7 * cm, 8 * cm], splitByRow=1, hAlign='LEFT')
+
+raw_data_table.setStyle([
+    ('LINEABOVE', (0, 1), (-1, -1), 0.25, colors.black),
+    ('VALIGN', (0, 0), (-1, -1), 'TOP')
+])
+
+content.append(raw_data_table)
+
 content.append(PageBreak())
+
+content.append(Spacer(1, 20))
+content.append(Paragraph(page_header, styles["header"]))
+content.append(Spacer(1, 10))
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Assembly Metriken
@@ -294,7 +378,7 @@ for key in quast_keys:
     status_key = qc_lookups[key] if key in qc_lookups else None
     qc_status = get_status(status_key, qc) if status_key else "missing"
 
-    quast_metrics.append([Paragraph(translation, styles["Normal"]), Paragraph(f"{value}", status_styles[qc_status])])
+    quast_metrics.append([Paragraph(translation, styles["Normal"]), Paragraph(f"{value}", styles["Normal"])])
 
 busco = data["busco"]
 busco_total = int(busco["dataset_total_buscos"])
@@ -306,8 +390,8 @@ busco_duplication = round(float(busco_duplicates / busco_total), 2) * 100
 busco_complete_status = get_status("busco_completeness", qc)
 busco_duplication_status = get_status("busco_duplicates", qc)
 
-quast_metrics.append(["BUSCO Gene vollständig (%)", Paragraph(f"{busco_completeness}", status_styles[busco_complete_status])])
-quast_metrics.append(["BUSCO Gene dupliziert (%)", Paragraph(f"{busco_duplication}", status_styles[busco_duplication_status])])
+quast_metrics.append(["BUSCO Gene vollständig (%)", Paragraph(f"{busco_completeness}", styles["Normal"])])
+quast_metrics.append(["BUSCO Gene dupliziert (%)", Paragraph(f"{busco_duplication}", styles["Normal"])])
 
 quast_metrics_table = Table(quast_metrics, colWidths=[8 * cm, 4 * cm], splitByRow=1, hAlign='LEFT')
 
@@ -317,26 +401,65 @@ quast_metrics_table.setStyle([
 ])
 
 content.append(quast_metrics_table)
+content.append(Spacer(1, 10))
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Kontaminierungen
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+content.append(Paragraph("Kontaminationskontrolle", styles["H2_bg"]))
+content.append(Spacer(1, 10))
+
+info = "Metriken zur Bestimmung eventueller Kontaminationen"
+
+content.append(Paragraph(info, styles["Info"]))
+content.append(Spacer(1, 10))
+
+contaminations = []
+contaminations = [[Paragraph("Metrik", styles["Bold"]), Paragraph("Wert", styles["Bold"])]]
+
+confindr_illumina_status = get_status("confindr_illumina", qc)
+
+contaminations.append(["Illumina Sequenzkontamination", (Paragraph(f"{illumina_contam_info}", status_styles[confindr_illumina_status]))])
+
+taxonkit_status = get_status("taxonkit_genus_fraction", qc)
+contaminations.append(["Assembly - primäre Spezies", (Paragraph(f"<i>{majority_species}</i> ({majority_fraction}%)",status_styles[taxonkit_status]))])
+if minority_species:
+    contaminations.append(["Assembly: Sekundäre Spezies", (Paragraph(f"{minority_species} ({minority_fraction}%)", styles["Normal"]))])
+
+contaminations_table = Table(contaminations, colWidths=[8 * cm, 8 * cm], splitByRow=1, hAlign='LEFT')
+contaminations_table.setStyle([
+    ('LINEABOVE', (0, 1), (-1, -1), 0.25, colors.black),
+    ('VALIGN', (0, 0), (-1, -1), 'TOP')
+])
+
+content.append(contaminations_table)
+content.append(Spacer(1, 10))
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # QC Metriken
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 content.append(Spacer(1, 20))
-content.append(Paragraph("Qualitätskontrolle", styles["H2_bg"]))
+content.append(Paragraph("Interne Qualitätsmetriken", styles["H2_bg"]))
+content.append(Spacer(1, 10))
+
+info = "Pipeline-interne Schwellenwerte und Klassifikation"
+
+content.append(Paragraph(info, styles["Info"]))
 content.append(Spacer(1, 10))
 
 qc_entries = [[Paragraph("Metrik", styles["Bold"]), Paragraph("Status", styles["Bold"])]]
 
 for item in sorted(qc_pass):
-    qc_entries.append([Paragraph(item, styles["Normal"]), Paragraph("Pass", status_styles["pass"])])
+    qc_entries.append([Paragraph(item, styles["Normal"]), Paragraph("pass", status_styles["pass"])])
 
 
 for item in sorted(qc_warn):
-    qc_entries.append([Paragraph(item, styles["Normal"]), Paragraph("Warn", status_styles["warn"])])
+    qc_entries.append([Paragraph(item, styles["Normal"]), Paragraph("warn", status_styles["warn"])])
 
 for item in sorted(qc_fail):
-    qc_entries.append([Paragraph(item, styles["Normal"]), Paragraph("Fail", status_styles["fail"])])
+    qc_entries.append([Paragraph(item, styles["Normal"]), Paragraph("fail", status_styles["fail"])])
 
 qc_table = Table(qc_entries, colWidths=[8 * cm, 4 * cm], splitByRow=1, hAlign='LEFT')
 
@@ -346,16 +469,22 @@ qc_table.setStyle([
 ])
 
 content.append(qc_table)
+content.append(Spacer(1, 20))
+
+content.append(Paragraph(f"* <b>pass</b>: keine Beanstandungen, <b>warn</b>: Wert(e) leicht außerhalb der Norm, <b>fail</b>: Wert(e) außerhalb der Norm, Probe kann ggf. nicht verwendet werden", styles["Info"]))
+content.append(Spacer(1, 20))
 
 content.append(PageBreak())
 
+content.append(Spacer(1, 20))
+content.append(Paragraph(page_header, styles["header"]))
+content.append(Spacer(1, 10))
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Charakterisierung
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-content.append(Spacer(1, 20))
-content.append(Paragraph("Resistenz- und Virulenzgene", styles["H2_bg"]))
+content.append(Paragraph("Resistenz- und Virulenzgene (nicht akkreditiert)", styles["H2_bg"]))
 content.append(Spacer(1, 10))
 
 characterization = [[Paragraph("Gen", styles["Bold"]), Paragraph("Beschreibung", styles["Bold"]), Paragraph("Klasse", styles["Bold"]), Paragraph("Typ", styles["Bold"])]]
@@ -371,8 +500,13 @@ characterization_table.setStyle([
 ])
 
 content.append(characterization_table)
+content.append(Spacer(1, 20))
 
 content.append(PageBreak())
+
+content.append(Spacer(1, 20))
+content.append(Paragraph(page_header, styles["header"]))
+content.append(Spacer(1, 10))
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Pipeline Einstellungen
