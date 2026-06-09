@@ -490,10 +490,6 @@ content.append(Spacer(1, 20))
 
 content.append(PageBreak())
 
-content.append(Spacer(1, 20))
-content.append(Paragraph(page_header, styles["header"]))
-content.append(Spacer(1, 10))
-
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Pipeline Einstellungen
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -501,7 +497,7 @@ content.append(Spacer(1, 10))
 content.append(Paragraph("Einstellungen", styles["H2_bg"]))
 content.append(Spacer(1, 10))
 
-software = []
+software = [[Paragraph("Parameter", styles["Bold"]), Paragraph("Einstellung", styles["Bold"])]]
 for key, values in settings.items():
     if type(values) is not dict:
         software.append([key, Paragraph(str(values), styles["table"])])
