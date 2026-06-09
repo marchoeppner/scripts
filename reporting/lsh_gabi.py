@@ -109,7 +109,7 @@ class MyDocTemplate(BaseDocTemplate):
             id='header'
         )
         self.footer_frame = Frame(
-            cm, 0.5 * cm, self.pagesize[0] - cm,  cm,
+            cm, cm, self.pagesize[0] - cm,  cm,
             id='footer'
         )
 
@@ -134,13 +134,16 @@ class MyDocTemplate(BaseDocTemplate):
         # Draw the footer
 
         self.footer_style.alignment = 1  # center align the footer text
-        footer_text = Paragraph("Seite <seq id='PageNumber'/> von <seq id='TotalPages'/>", self.footer_style)
+        footer_text = Paragraph("Seite <seq id='PageNumber'/> ", self.footer_style)
         footer_text.wrapOn(canvas, self.footer_frame.width, self.footer_frame.height)
         footer_text.drawOn(canvas, self.footer_frame.x1, self.footer_frame.y1)
 
 
+
+outfile = args.output if args.output else args.json.split("/")[-1].replace(".qc.json", ".pdf")
+
 # Create a new PDF document using the template
-pdf_doc = MyDocTemplate('example_page_template_header_footer.pdf', pagesize=A4,)
+pdf_doc = MyDocTemplate(outfile, pagesize=A4,)
 
 # Set variables
 
@@ -211,6 +214,7 @@ qc_warnings = qc["messages"]
 qc_pass = qc["pass"]
 qc_warn = qc["warn"]
 qc_fail = qc["fail"]
+technology = "Illumina"
 
 taxkit = data["taxonkit"]
 taxkit_majority = taxkit["species"][0]
@@ -240,10 +244,15 @@ if "illumina" in data["mosdepth"]:
 else:
     coverage_illumina = None
 
+if "illumina" in data["mosdepth"] and "nanopore" in data["mosdepth"]:
+    technology = "Hybrid (Illumina und Nanopore)"
+elif "nanopore" in data["mosdepth"]:
+    technology = "Nanopore"
+
 if "fastp" in data:
     has_illumina = True
     q30_rate = round(data["fastp"]["summary"]["before_filtering"]["q30_rate"], 2)*100
-    read_length = data["fastp"]["read1_before_filtering"]["total_cycles"]
+    read_length = f"2x{data['fastp']['read1_before_filtering']['total_cycles']}"
     insert_size = data["fastp"]["insert_size"]["peak"]
     total_bases = round(data["fastp"]["read1_before_filtering"]["total_bases"]/1000000, 0)
     assembly_size = round(float(quast["Total length"] / 1000000), 3)
@@ -368,6 +377,7 @@ content.append(Spacer(1, 10))
 raw_data = []
 raw_data = [[Paragraph("Metrik", styles["Bold"]), Paragraph("Wert", styles["Bold"])]]
 
+raw_data.append(["Sequenziertechnologie", Paragraph(f"{technology}", styles["Normal"])])
 raw_data.append(["Readlänge (Basen)", Paragraph(f"{read_length}", styles["Normal"])])
 raw_data.append(["Basenmenge (Millionen)", Paragraph(f"{total_bases}", styles["Normal"])])
 raw_data.append(["Mittlere Sequenziertiefe (X)", Paragraph(f"{coverage_illumina}", styles["Normal"])])
