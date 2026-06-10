@@ -359,6 +359,7 @@ summary_table.setStyle([
 
 content.append(summary_table)
 
+content.append(Spacer(1, 20))
 content.append(Paragraph(f"* Nicht Teil der Validierung/Akkreditierung der Methode.", styles["Info"]))
 content.append(Spacer(1, 20))
 
@@ -431,8 +432,8 @@ busco_duplication = round(float(busco_duplicates / busco_total), 2) * 100
 busco_complete_status = get_status("busco_completeness", qc)
 busco_duplication_status = get_status("busco_duplicates", qc)
 
-quast_metrics.append(["BUSCO Gene vollständig (%)", Paragraph(f"{busco_completeness}", styles["Normal"])])
-quast_metrics.append(["BUSCO Gene dupliziert (%)", Paragraph(f"{busco_duplication}", styles["Normal"])])
+quast_metrics.append(["BUSCO Gene - vollständig (%)", Paragraph(f"{busco_completeness}", styles["Normal"])])
+quast_metrics.append(["BUSCO Gene - dupliziert (%)", Paragraph(f"{busco_duplication}", styles["Normal"])])
 
 quast_metrics_table = Table(quast_metrics, colWidths=[8 * cm, 4 * cm], splitByRow=1, hAlign='LEFT')
 
@@ -475,7 +476,6 @@ contaminations_table.setStyle([
 ])
 
 content.append(contaminations_table)
-content.append(Spacer(1, 10))
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # QC Metriken
@@ -511,10 +511,9 @@ qc_table.setStyle([
 
 content.append(qc_table)
 
-content.append(Spacer(1, 20))
+content.append(Spacer(1, 10))
 
 content.append(Paragraph(f"* <b>pass</b>: keine Beanstandungen, <b>warn</b>: Wert(e) leicht außerhalb der Norm, <b>fail</b>: Wert(e) außerhalb der Norm, Probe kann ggf. nicht verwendet werden", styles["Info"]))
-content.append(Spacer(1, 5))
 
 content.append(PageBreak())
 
