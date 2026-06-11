@@ -4,15 +4,15 @@
 import argparse
 import json
 from reportlab.lib.enums import TA_JUSTIFY, TA_RIGHT
-from reportlab.lib.units import cm
-from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch, cm
+from reportlab.lib.pagesizes import A4
 from reportlab.graphics.shapes import Drawing, Line
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, PageBreak
+from reportlab.platypus import BaseDocTemplate, PageTemplate, Frame, Paragraph, NextPageTemplate, PageBreak, Image, Spacer, Table
+from reportlab.pdfgen.canvas import Canvas
 from reportlab.lib import colors
 
 from datetime import date
-
 
 def get_status(key, reference):
 
@@ -44,13 +44,12 @@ def get_serotype(serotypes):
             if (data["mecA"] == "+"):
                 result["genes"] = "mecA"
         elif (tool == "ectyper"):
+            result["tool"] = tool
+            result["serotype"] = data["Serotype"]
             result["genes"] = data["PathotypeGenes"]
             if "ND" not in data["Pathotype"]:
                 result["pathotype"] = data["Pathotype"]
             result["classification"] = data["StxSubtypes"]
-        elif (tool == "ecoh"):
-            result["serotype"] = data["serotype"]
-            result["tool"] = tool
         elif (tool == "sistr"):
             result["tool"] = tool
             result["serotype"] = data["serogroup"]
@@ -74,7 +73,7 @@ date = today.strftime("%d.%m.%Y")
 
 # Command line arguments
 parser = argparse.ArgumentParser(description="Script options")
-parser.add_argument("--json")
+parser.add_argument("--json", required=True)
 parser.add_argument("--logo", required=True)
 parser.add_argument("--output")
 args = parser.parse_args()
@@ -82,39 +81,97 @@ args = parser.parse_args()
 # Use defaults or take from command line
 outfile = args.output if args.output else args.json.split("/")[-1].replace(".qc.json", ".pdf")
 
+
+class MyDocTemplate(BaseDocTemplate):
+    """Template class for PDF document"""
+
+    def __init__(self, filename, **kwargs):
+        super().__init__(filename, **kwargs)
+        
+        # Define the page frames
+        self.frame = Frame(
+            x1=1.5*cm,
+            y1=1.5*cm, 
+            width=self.pagesize[0] - cm * 3, 
+            height=self.pagesize[1] - 4 *cm,
+            id='normal'
+        )
+
+        # Define the styles for header and footer
+        self.styles = getSampleStyleSheet()
+        self.header_style = self.styles['Normal']
+        self.footer_style = self.styles['Normal']
+
+       
+        # Define the header and footer frames
+        self.header_frame = Frame(
+            cm, self.pagesize[1] - 2 * cm, self.pagesize[0] - 2* cm, 0.5 * cm,
+            id='header'
+        )
+        self.footer_frame = Frame(
+            cm, cm, self.pagesize[0] - cm,  cm,
+            id='footer'
+        )
+
+        # Define the PageTemplate
+        self.addPageTemplates([
+            PageTemplate(
+                id='FirstPage',
+                frames=[self.frame, self.header_frame, self.footer_frame],
+                onPage=self._header_footer,
+                onPageEnd=self._footer
+            )
+        ])
+
+    def _header_footer(self, canvas, doc):
+        # Draw the header
+        self.header_style.alignment = 1  # center align the header text
+        header_text = Paragraph('Bericht zur Gesamtgenom-Sequenzierung mittels NGS (M-2448)', self.header_style)
+        header_text.wrapOn(canvas, self.header_frame.width, self.header_frame.height)
+        header_text.drawOn(canvas, self.header_frame.x1, self.header_frame.y1)
+
+    def _footer(self, canvas, doc):
+        # Draw the footer
+
+        self.footer_style.alignment = 1  # center align the footer text
+        footer_text = Paragraph("Seite <seq id='PageNumber'/> ", self.footer_style)
+        footer_text.wrapOn(canvas, self.footer_frame.width, self.footer_frame.height)
+        footer_text.drawOn(canvas, self.footer_frame.x1, self.footer_frame.y1)
+
+
+
+outfile = args.output if args.output else args.json.split("/")[-1].replace(".qc.json", ".pdf")
+
+# Create a new PDF document using the template
+pdf_doc = MyDocTemplate(outfile, pagesize=A4,)
+
+# Set variables
+
 content = []
 
-pdf = SimpleDocTemplate(outfile, pagesize=A4,
-                        rightMargin=35, leftMargin=35,
-                        topMargin=20, bottomMargin=20)
+has_illumina = False
+has_nanopore = False
 
 # Define styles
 styles = getSampleStyleSheet()
+
 styles.add(ParagraphStyle(name='Justify', alignment=TA_JUSTIFY))
 styles.add(ParagraphStyle(name='H1', fontSize=14))
 styles.add(ParagraphStyle(name='H2', fontSize=12))
-
 styles.add(ParagraphStyle(name='header', fontSize=8))
-
-
-styles.add(ParagraphStyle(name='H2_bg', backColor="#CCCCCC", borderPadding=4, fontSize=12))
+styles.add(ParagraphStyle(name='H2_bg', backColor="#1e335e", textColor="#ffffff", borderPadding=4, fontSize=12))
 styles.add(ParagraphStyle(name='Standard', fontSize=10))
 styles.add(ParagraphStyle(name='table', fontSize=8))
 styles.add(ParagraphStyle(name='Taxon', fontSize=10, fontName="Helvetica"))
-
-
 styles.add(ParagraphStyle(name='Gray', fontSize=10, textColor="#9c9c9c"))
-
 styles.add(ParagraphStyle(name='Bold', fontSize=10, fontName="Helvetica-Bold"))
 styles.add(ParagraphStyle(name='H2_right', fontSize=12, alignment=TA_RIGHT))
 styles.add(ParagraphStyle(name='Info', fontSize=8))
 styles.add(ParagraphStyle(name='Sequence', fontSize=8, fontName="Courier"))
-
 styles.add(ParagraphStyle(name='Status_pass', backColor="#72CC77", fontSize=10))
 styles.add(ParagraphStyle(name='Status_fail', backColor="#D46860", fontSize=10))
 styles.add(ParagraphStyle(name='Status_warn', backColor="#CECB43", fontSize=10))
 styles.add(ParagraphStyle(name='Status_missing', fontSize=10))
-
 styles.add(ParagraphStyle(name='Unicode', fontName="D050000L", fontSize=10))
 
 status_styles = {
@@ -127,19 +184,16 @@ status_styles = {
 qc_lookups = {
     "Total length": "quast_assembly",
     "# contigs": "quast_contigs",
-    "N50": "quast_n50",
+    "N50 (Basen)": "quast_n50",
     "GC (%)": "quast_gc",
     "Duplication ratio": "quast_duplication"
 }
 
-# The header
+# The logo
 logo = Image(args.logo, height=3 * cm, width=6 * cm)
 logo.hAlign = "RIGHT"
 content.append(logo)
 content.append(Spacer(1, 20))
-
-has_illumina = False
-has_nanopore = False
 
 ##############################
 # Parse JSON
@@ -160,6 +214,7 @@ qc_warnings = qc["messages"]
 qc_pass = qc["pass"]
 qc_warn = qc["warn"]
 qc_fail = qc["fail"]
+technology = "Illumina"
 
 taxkit = data["taxonkit"]
 taxkit_majority = taxkit["species"][0]
@@ -189,10 +244,15 @@ if "illumina" in data["mosdepth"]:
 else:
     coverage_illumina = None
 
+if "illumina" in data["mosdepth"] and "nanopore" in data["mosdepth"]:
+    technology = "Hybrid (Illumina und Nanopore)"
+elif "nanopore" in data["mosdepth"]:
+    technology = "Nanopore"
+
 if "fastp" in data:
     has_illumina = True
     q30_rate = round(data["fastp"]["summary"]["before_filtering"]["q30_rate"], 2)*100
-    read_length = data["fastp"]["read1_before_filtering"]["total_cycles"]
+    read_length = f"2x{data['fastp']['read1_before_filtering']['total_cycles']}"
     insert_size = data["fastp"]["insert_size"]["peak"]
     total_bases = round(data["fastp"]["read1_before_filtering"]["total_bases"]/1000000, 0)
     assembly_size = round(float(quast["Total length"] / 1000000), 3)
@@ -214,14 +274,8 @@ if confindr["illumina"] and len(confindr["illumina"][0]) > 0:
 ##############################
 # PDF construction starts here
 ##############################
-disclaimer = f"Anlage zur Gesamtgenome-Sequenzierung von {sample}"
-
-content.append(Paragraph(disclaimer, styles["Normal"]))
-content.append(Spacer(1, 12))
 
 header = "Bericht zur Gesamtgenom-Sequenzierung mittels NGS (M-2448)"
-page_header = f"{sample} - {header}"
-
 content.append(Paragraph(header, styles["H1"]))
 content.append(Spacer(1, 12))
 
@@ -233,7 +287,7 @@ content.append(Spacer(1, 12))
 key_translation = {
     "Total length": "Gesamtgröße",
     "# contigs": "Anzahl Contigs",
-    "N50": "N50",
+    "N50 (Basen)": "N50",
     "# contigs (>= 1000 bp)": "Anzahl Contigs > 1kb",
     "GC (%)": "GC Gehalt (%)",
     "Largest contig": "Größtes Contig",
@@ -243,6 +297,7 @@ key_translation = {
 ####################
 # Section: Uebersicht
 ####################
+
 
 content.append(Spacer(1, 4))
 
@@ -264,37 +319,30 @@ serotypes = data["serotype"]
 
 summary = []
 
+translated_call = "OK"
+if qc["call"] == "warn":
+    translated_call = "OK"
+elif qc["call"] == "fail":
+    translated_call = "Qualitätsprobleme"
+
 summary.append(["Untersuchte Probe", sample])
-summary.append(["Status der Sequenzierung*", Paragraph(qc["call"], status_styles[qc["call"]])])
-summary.append(["Sequenziertechnologie", Paragraph("Illumina (MiSeq)", styles["Normal"])])
+summary.append(["Status der Sequenzierung*", Paragraph(translated_call, status_styles[qc["call"]])])
 summary.append(["Mittlere Sequenziertiefe", Paragraph(f"{coverage_illumina} X", styles["Normal"])])
 summary.append(["Ermitteltes Taxon", Paragraph(f"<i>{taxon}</i>", styles["Taxon"])])
 summary.append(["Assemblygröße (Mb)", Paragraph(f"{assembly_size}", styles["Normal"])])
 summary.append(["Contigs > 1kb", quast["# contigs (>= 1000 bp)"]])
 summary.append(["Plasmide", f"{len(plasmids)}"])
 if (mlst):
-    summary.append(["MLST Typ (Schema)**", f"{mlst['sequence_type']} ({mlst['scheme']})"])
+    summary.append(["MLST Typ (Schema)*", f"{mlst['sequence_type']} ({mlst['scheme']})"])
 
 if (len(serotypes) > 0):
     this_sero = get_serotype(serotypes)
-    summary.append(["Serotyp (Software)**", f"{this_sero['serotype']} ({this_sero['tool']})"])
-    if ("pathotype" in this_sero):
-        summary.append(["Pathotyp**", this_sero["pathotype"]])
+    summary.append(["Serotyp (Software)*", f"{this_sero['serotype']} ({this_sero['tool']})"])
+    if (this_sero["pathotype"]):
+        summary.append(["Pathotyp*", this_sero["pathotype"]])
 
-    if ("genes" in this_sero):
-        summary.append(["Virulenzgene**", this_sero["genes"]])
-
-    if ("classification" in this_sero):
-        summary.append(["STX Typ**", this_sero["classification"]])
-
-confindr = data["confindr"]
-
-if "illumina" in confindr:
-    confindr_illumina = data["confindr"]["illumina"][0][0]
-
-    if "confindr_illumina" in qc_fail:
-        contam_info = "inter-species" if ":" in confindr_illumina["Genus"] else confindr_illumina["NumContamSNVs"]
-        summary.append(["Kontamination (Sequenzen)", contam_info])
+if "confindr_illumina" in qc_fail:
+    summary.append(["Kontamination (Sequenzen)", illumina_contam_info])
 
 if "taxonkit_genus_fraction" in qc_fail:
 
@@ -310,13 +358,10 @@ summary_table.setStyle([
 ])
 
 content.append(summary_table)
-content.append(Spacer(1, 20))
 
-content.append(Paragraph(f"* <b>pass</b>: keine Beanstandungen, <b>warn</b>: Wert(e) leicht außerhalb der Norm, <b>fail</b>: Wert(e) außerhalb der Norm, Probe kann ggf. nicht verwendet werden", styles["Info"]))
-content.append(Spacer(1, 5))
-content.append(Paragraph(f"** Nicht Teil der Validierung/Akkreditierung der Methode.", styles["Info"]))
 content.append(Spacer(1, 20))
-
+content.append(Paragraph(f"* Nicht Teil der Validierung/Akkreditierung der Methode.", styles["Info"]))
+content.append(Spacer(1, 20))
 
 # ~~~~~~~~~~~~~~~~~~~~~~~
 # Rohdaten Metriken
@@ -333,7 +378,8 @@ content.append(Spacer(1, 10))
 raw_data = []
 raw_data = [[Paragraph("Metrik", styles["Bold"]), Paragraph("Wert", styles["Bold"])]]
 
-raw_data.append(["Readlänge (Basen)", Paragraph(f"2x{read_length}", styles["Normal"])])
+raw_data.append(["Sequenziertechnologie", Paragraph(f"{technology}", styles["Normal"])])
+raw_data.append(["Readlänge (Basen)", Paragraph(f"{read_length}", styles["Normal"])])
 raw_data.append(["Basenmenge (Millionen)", Paragraph(f"{total_bases}", styles["Normal"])])
 raw_data.append(["Mittlere Sequenziertiefe (X)", Paragraph(f"{coverage_illumina}", styles["Normal"])])
 raw_data.append(["Anteil Q30 Basen (%)", Paragraph(f"{q30_rate}", styles["Normal"])])
@@ -349,10 +395,6 @@ raw_data_table.setStyle([
 content.append(raw_data_table)
 
 content.append(PageBreak())
-
-content.append(Spacer(1, 20))
-content.append(Paragraph(page_header, styles["header"]))
-content.append(Spacer(1, 10))
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Assembly Metriken
@@ -390,8 +432,8 @@ busco_duplication = round(float(busco_duplicates / busco_total), 2) * 100
 busco_complete_status = get_status("busco_completeness", qc)
 busco_duplication_status = get_status("busco_duplicates", qc)
 
-quast_metrics.append(["BUSCO Gene vollständig (%)", Paragraph(f"{busco_completeness}", styles["Normal"])])
-quast_metrics.append(["BUSCO Gene dupliziert (%)", Paragraph(f"{busco_duplication}", styles["Normal"])])
+quast_metrics.append(["BUSCO Gene - vollständig (%)", Paragraph(f"{busco_completeness}", styles["Normal"])])
+quast_metrics.append(["BUSCO Gene - dupliziert (%)", Paragraph(f"{busco_duplication}", styles["Normal"])])
 
 quast_metrics_table = Table(quast_metrics, colWidths=[8 * cm, 4 * cm], splitByRow=1, hAlign='LEFT')
 
@@ -434,7 +476,6 @@ contaminations_table.setStyle([
 ])
 
 content.append(contaminations_table)
-content.append(Spacer(1, 10))
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # QC Metriken
@@ -469,16 +510,12 @@ qc_table.setStyle([
 ])
 
 content.append(qc_table)
-content.append(Spacer(1, 20))
+
+content.append(Spacer(1, 10))
 
 content.append(Paragraph(f"* <b>pass</b>: keine Beanstandungen, <b>warn</b>: Wert(e) leicht außerhalb der Norm, <b>fail</b>: Wert(e) außerhalb der Norm, Probe kann ggf. nicht verwendet werden", styles["Info"]))
-content.append(Spacer(1, 20))
 
 content.append(PageBreak())
-
-content.append(Spacer(1, 20))
-content.append(Paragraph(page_header, styles["header"]))
-content.append(Spacer(1, 10))
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Charakterisierung
@@ -487,22 +524,33 @@ content.append(Spacer(1, 10))
 content.append(Paragraph("Resistenz- und Virulenzgene (nicht akkreditiert)", styles["H2_bg"]))
 content.append(Spacer(1, 10))
 
-characterization = [[Paragraph("Gen", styles["Bold"]), Paragraph("Beschreibung", styles["Bold"]), Paragraph("Klasse", styles["Bold"]), Paragraph("Typ", styles["Bold"])]]
+characterization = []
+
+stepsize = 40
+amr_index = 0
 
 for amr in amrs:
     characterization.append([Paragraph(amr['Gene symbol'], styles["Bold"]), Paragraph(amr['Sequence name'], styles["Normal"]), Paragraph(amr['Class'], styles["Normal"]), Paragraph(amr['Element type'], styles["Normal"])])
 
-characterization_table = Table(characterization, colWidths=[2 * cm, 8 * cm, 3 * cm, 3 * cm], splitByRow=1, hAlign='LEFT')
+items = len(characterization)
 
-characterization_table.setStyle([
-    ('LINEABOVE', (0, 1), (-1, -1), 0.25, colors.black),
-    ('VALIGN', (0, 0), (-1, -1), 'TOP')
-])
+while amr_index < items:
+    header = [[Paragraph("Gen", styles["Bold"]), Paragraph("Beschreibung", styles["Bold"]), Paragraph("Klasse", styles["Bold"]), Paragraph("Typ", styles["Bold"])]]
 
-content.append(characterization_table)
-content.append(Spacer(1, 20))
+    this_characterization = characterization[amr_index:stepsize]
+    amr_index += len(this_characterization)
 
-content.append(PageBreak())
+    characterization_table = Table(header+this_characterization, colWidths=[2 * cm, 8 * cm, 3 * cm, 3 * cm], splitByRow=1, repeatRows=[0], hAlign='LEFT')
+
+    characterization_table.setStyle([
+        ('LINEABOVE', (0, 1), (-1, -1), 0.25, colors.black),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP')
+    ])
+
+    content.append(characterization_table)
+    content.append(Spacer(1, 20))
+
+    content.append(PageBreak())
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Pipeline Einstellungen
@@ -511,19 +559,37 @@ content.append(PageBreak())
 content.append(Paragraph("Einstellungen", styles["H2_bg"]))
 content.append(Spacer(1, 10))
 
-software = [[Paragraph("Parameter", styles["Bold"]), Paragraph("Einstellung", styles["Bold"])]]
+software = []
 for key, values in settings.items():
     if type(values) is not dict:
         software.append([key, Paragraph(str(values), styles["table"])])
 
-software_table = Table(software, colWidths=[7 * cm, 10 * cm], splitByRow=1, hAlign='LEFT')
+items = len(software)
+stepsize = 44
+software_index = 0
 
-software_table.setStyle([
-    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-    ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
-    ('TOPPADDING', (0, 0), (-1, -1), 1)
-])
+while software_index < items:
 
-content.append(software_table)
+    bucket_size = software_index + stepsize
 
-pdf.build(content)
+    header = [[Paragraph("Parameter", styles["Bold"]), Paragraph("Einstellung", styles["Bold"])]]
+    this_software = software[software_index:bucket_size]
+    software_index += len(this_software)
+
+    software_table = Table(header+this_software, colWidths=[7 * cm, 8 * cm], splitByRow=1, repeatRows=1, hAlign='LEFT')
+
+    software_table.setStyle([
+        ('LINEABOVE', (0, 1), (-1, -1), 0.25, colors.black),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 1),
+        ('TOPPADDING', (0, 0), (-1, -1), 1)
+    ])
+
+    content.append(software_table)
+    content.append(PageBreak())
+
+
+########################
+# Emitting PDF
+#########################
+pdf_doc.build(content)
