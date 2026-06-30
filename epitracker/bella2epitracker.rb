@@ -241,10 +241,10 @@ partitions.each do |part|
 
             log.info "Processing sample #{sample_name}.."
             sample = Epitracker::Sample.find_by_name(sample_name)
-            if !sample
+            if !sample || sample.nil?
                 log.error "Missing sample #{sample_name} in database!"
             end
-
+            
             cgmlst_profiles = sample.assemblies.first.cgmlst_profiles
 
             this_profile = cgmlst_profiles.find {|c| c.cgmlst_schema_id == cgmlst_schema.id }

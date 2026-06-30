@@ -34,7 +34,7 @@ def get_status(key, reference):
 
 def get_serotype(serotypes):
 
-    result = {"serotype": "", "pathotype": None, "genes": None, "classification": None, "tool": None}
+    result = {"serotype": "", "pathotype": None, "genes": None, "subtypes": None, "classification": None, "tool": None}
 
     for tool, data in serotypes.items():
 
@@ -46,6 +46,8 @@ def get_serotype(serotypes):
         elif (tool == "ectyper"):
             result["tool"] = tool
             result["serotype"] = data["Serotype"]
+            if "-" not in data["StxSubtypes"]:
+                result["subtypes"] = data["StxSubtypes"]
             result["genes"] = data["PathotypeGenes"]
             if "ND" not in data["Pathotype"]:
                 result["pathotype"] = data["Pathotype"]
@@ -109,7 +111,7 @@ class MyDocTemplate(BaseDocTemplate):
             id='header'
         )
         self.footer_frame = Frame(
-            cm, cm, self.pagesize[0] - cm,  cm,
+            cm, cm, self.pagesize[0] - 2* cm,  cm,
             id='footer'
         )
 
@@ -215,6 +217,8 @@ qc_pass = qc["pass"]
 qc_warn = qc["warn"]
 qc_fail = qc["fail"]
 technology = "Illumina"
+virulence_genes = []
+subtypes = []
 
 taxkit = data["taxonkit"]
 taxkit_majority = taxkit["species"][0]
@@ -340,6 +344,22 @@ if (len(serotypes) > 0):
     summary.append(["Serotyp (Software)*", f"{this_sero['serotype']} ({this_sero['tool']})"])
     if (this_sero["pathotype"]):
         summary.append(["Pathotyp*", this_sero["pathotype"]])
+    if ("genes"  in this_sero):
+        if this_sero["genes"] is not None:
+            virulence_genes.append(this_sero["genes"])
+    if ("subtypes" in this_sero):
+        if this_sero["subtypes"] is not None:
+            subtypes.append(this_sero["subtypes"])
+
+sorted(virulence_genes)
+sorted(subtypes)
+
+if (len(virulence_genes) > 0):
+    genes = ",".join(virulence_genes)
+    summary.append(["Virulenz-Gene*", genes])
+
+if (len(subtypes) > 0):
+    summary.append(["Stx Typ(en)*", ",".join(subtypes)])
 
 if "confindr_illumina" in qc_fail:
     summary.append(["Kontamination (Sequenzen)", illumina_contam_info])
@@ -526,7 +546,7 @@ content.append(Spacer(1, 10))
 
 characterization = []
 
-stepsize = 40
+stepsize = 25
 amr_index = 0
 
 for amr in amrs:
@@ -535,9 +555,10 @@ for amr in amrs:
 items = len(characterization)
 
 while amr_index < items:
+
     header = [[Paragraph("Gen", styles["Bold"]), Paragraph("Beschreibung", styles["Bold"]), Paragraph("Klasse", styles["Bold"]), Paragraph("Typ", styles["Bold"])]]
 
-    this_characterization = characterization[amr_index:stepsize]
+    this_characterization = characterization[amr_index:stepsize+amr_index]
     amr_index += len(this_characterization)
 
     characterization_table = Table(header+this_characterization, colWidths=[2 * cm, 8 * cm, 3 * cm, 3 * cm], splitByRow=1, repeatRows=[0], hAlign='LEFT')
@@ -548,7 +569,6 @@ while amr_index < items:
     ])
 
     content.append(characterization_table)
-    content.append(Spacer(1, 20))
 
     content.append(PageBreak())
 
@@ -565,7 +585,7 @@ for key, values in settings.items():
         software.append([key, Paragraph(str(values), styles["table"])])
 
 items = len(software)
-stepsize = 44
+stepsize = 40
 software_index = 0
 
 while software_index < items:
@@ -573,7 +593,7 @@ while software_index < items:
     bucket_size = software_index + stepsize
 
     header = [[Paragraph("Parameter", styles["Bold"]), Paragraph("Einstellung", styles["Bold"])]]
-    this_software = software[software_index:bucket_size]
+    this_software = software[software_index:bucket_size+software_index]
     software_index += len(this_software)
 
     software_table = Table(header+this_software, colWidths=[7 * cm, 8 * cm], splitByRow=1, repeatRows=1, hAlign='LEFT')

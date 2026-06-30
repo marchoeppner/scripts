@@ -44,12 +44,13 @@ def get_serotype(serotypes):
             if (data["mecA"] == "+"):
                 result["genes"] = "mecA"
         elif (tool == "ectyper"):
-            result["tool"] = tool
-            result["serotype"] = data["Serotype"]
             result["genes"] = data["PathotypeGenes"]
             if "ND" not in data["Pathotype"]:
                 result["pathotype"] = data["Pathotype"]
             result["classification"] = data["StxSubtypes"]
+        elif (tool == "ecoh"):
+            result["serotype"] = data["serotype"]
+            result["tool"] = tool
         elif (tool == "sistr"):
             result["tool"] = tool
             result["serotype"] = data["serogroup"]
@@ -265,6 +266,7 @@ summary = []
 
 summary.append(["Untersuchte Probe", sample])
 summary.append(["Status der Sequenzierung*", Paragraph(qc["call"], status_styles[qc["call"]])])
+summary.append(["Sequenziertechnologie", Paragraph("Illumina (MiSeq)", styles["Normal"])])
 summary.append(["Mittlere Sequenziertiefe", Paragraph(f"{coverage_illumina} X", styles["Normal"])])
 summary.append(["Ermitteltes Taxon", Paragraph(f"<i>{taxon}</i>", styles["Taxon"])])
 summary.append(["Assemblygröße (Mb)", Paragraph(f"{assembly_size}", styles["Normal"])])
@@ -276,11 +278,23 @@ if (mlst):
 if (len(serotypes) > 0):
     this_sero = get_serotype(serotypes)
     summary.append(["Serotyp (Software)**", f"{this_sero['serotype']} ({this_sero['tool']})"])
-    if (this_sero["pathotype"]):
-        summary.append(["Pathotyp", this_sero["pathotype"]])
+    if ("pathotype" in this_sero):
+        summary.append(["Pathotyp**", this_sero["pathotype"]])
 
-if "confindr_illumina" in qc_fail:
-    summary.append(["Kontamination (Sequenzen)", illumina_contam_info])
+    if ("genes" in this_sero):
+        summary.append(["Virulenzgene**", this_sero["genes"]])
+
+    if ("classification" in this_sero):
+        summary.append(["STX Typ**", this_sero["classification"]])
+
+confindr = data["confindr"]
+
+if "illumina" in confindr:
+    confindr_illumina = data["confindr"]["illumina"][0][0]
+
+    if "confindr_illumina" in qc_fail:
+        contam_info = "inter-species" if ":" in confindr_illumina["Genus"] else confindr_illumina["NumContamSNVs"]
+        summary.append(["Kontamination (Sequenzen)", contam_info])
 
 if "taxonkit_genus_fraction" in qc_fail:
 
@@ -319,7 +333,7 @@ content.append(Spacer(1, 10))
 raw_data = []
 raw_data = [[Paragraph("Metrik", styles["Bold"]), Paragraph("Wert", styles["Bold"])]]
 
-raw_data.append(["Readlänge (Basen)", Paragraph(f"{read_length}", styles["Normal"])])
+raw_data.append(["Readlänge (Basen)", Paragraph(f"2x{read_length}", styles["Normal"])])
 raw_data.append(["Basenmenge (Millionen)", Paragraph(f"{total_bases}", styles["Normal"])])
 raw_data.append(["Mittlere Sequenziertiefe (X)", Paragraph(f"{coverage_illumina}", styles["Normal"])])
 raw_data.append(["Anteil Q30 Basen (%)", Paragraph(f"{q30_rate}", styles["Normal"])])
@@ -502,7 +516,7 @@ for key, values in settings.items():
     if type(values) is not dict:
         software.append([key, Paragraph(str(values), styles["table"])])
 
-software_table = Table(software, colWidths=[7 * cm, 8 * cm], splitByRow=1, hAlign='LEFT')
+software_table = Table(software, colWidths=[7 * cm, 10 * cm], splitByRow=1, hAlign='LEFT')
 
 software_table.setStyle([
     ('VALIGN', (0, 0), (-1, -1), 'TOP'),
