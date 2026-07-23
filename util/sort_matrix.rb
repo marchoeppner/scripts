@@ -23,7 +23,7 @@ opts.parse!
 rows = {}
 columns = {}
 
-lines = IO.readlines(options.infile)
+lines = IO.readlines(options.infile)[1..-1]
 
 samples = []
 lines.each do |line|

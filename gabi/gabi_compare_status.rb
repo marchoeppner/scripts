@@ -32,14 +32,14 @@ mismatch = []
 
 IO.readlines(options.aquamis).each do |line|
 	sample,status = line.strip.split("\t")
-	aquamis[sample] = status
+	aquamis[sample] = status.downcase
 end
 
 IO.readlines(options.gabi).each do |line|
 	elements = line.strip.split("\t")
 	sample,status, mlst = elements[0..1]
 	status = "pass" if status == "warn"
-	gabi[sample] = status
+	gabi[sample] = status.downcase
 end
 
 gabi.each do |sample,status|

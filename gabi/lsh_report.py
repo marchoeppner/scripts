@@ -151,7 +151,13 @@ with open(args.json) as json_file:
 sample = data["sample"]
 run_date = data["date"]
 qc = data["qc"]
-settings = data["pipeline_settings"]
+settings = data["pipeline_settings"] if "pipeline_settings" in data else {}
+
+if "pipeline_settings" not in data:
+    software = data["software"]
+    settings["pipeline"] = "bio-raum/gabi"
+    settings["version"] = software["Workflow"]["bio-raum/gabi"]
+
 taxon = data["taxon"]
 quast = data["quast"]
 amr_finder = data["amr"]["amrfinder"]
@@ -278,13 +284,13 @@ if (mlst):
 if (len(serotypes) > 0):
     this_sero = get_serotype(serotypes)
     summary.append(["Serotyp (Software)**", f"{this_sero['serotype']} ({this_sero['tool']})"])
-    if ("pathotype" in this_sero):
+    if ("pathotype" in this_sero and this_sero["pathotype"] is not None):
         summary.append(["Pathotyp**", this_sero["pathotype"]])
 
     if ("genes" in this_sero):
         summary.append(["Virulenzgene**", this_sero["genes"]])
 
-    if ("classification" in this_sero):
+    if ("classification" in this_sero and this_sero["classification"] is not None):
         summary.append(["STX Typ**", this_sero["classification"]])
 
 confindr = data["confindr"]

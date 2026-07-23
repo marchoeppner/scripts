@@ -23,7 +23,7 @@ opts.parse!
 
 abort "Input folder does not exist" unless Dir.exist?(options.folder)
 
-jsons = Dir["#{options.folder}/*/aquamis/results/json/post_qc/*.json"]
+jsons = Dir["#{options.folder}/*/results/json/post_qc/*.json"]
 
 jsons.each do |json|
 
