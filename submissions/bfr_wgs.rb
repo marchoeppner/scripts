@@ -22,6 +22,7 @@ end
 options = OpenStruct.new()
 opts = OptionParser.new()
 opts.on("-i","--input", "=INPUT","INPUT folder") {|argument| options.input = argument }
+opts.on("-s","--samples", "=SAMPLES","List of samples to process") {|argument| options.samples = argument }
 opts.on("-o","--outfile", "=OUTFILE","Output file") {|argument| options.outfile = argument }
 opts.on("-h","--help","Display the usage information") {
     puts opts
@@ -37,6 +38,7 @@ wd = Dir.getwd
 # Logging
 # ------------
 
+options.samples ? samples = options.samples.split(",") : nil
 
 logfile = Logger.new($stdout)
 logfile.level = Logger::INFO
@@ -118,6 +120,10 @@ jsons.each do |json|
     j = JSON.parse(IO.readlines(json).join)
 
     sample = j["sample"]
+    
+    # Skip this sample if it isnt part of the sample list
+    next if samples && !samples.include?(sample)
+
     species = j["taxon"]
     qc = j["qc"]["call"]
 
