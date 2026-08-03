@@ -53,7 +53,7 @@ opts.parse!
 
 options.db ? db_file = options.db : db_file = "/work_syn/ngs/projects/epitracker/db/development.sqlite3"
 
-options.date ? analysis_date = Date.parse(options.date) : analysis_date = false
+options.date ? analysis_date = Date.parse(options.date) : analysis_date = nil
 
 Epitracker::DBConnection.connect({database: db_file})
 
@@ -122,7 +122,7 @@ else
         genus,species = json["taxon"].split(" ")
 
         date_string = json["date"]
-        if analysis_date.nil?
+        if !analysis_date
             analysis_date = Date.parse(date_string)
         end
 

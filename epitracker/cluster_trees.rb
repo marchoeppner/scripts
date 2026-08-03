@@ -30,8 +30,8 @@ opts.parse!
 
 options.db ? db_file = options.db : db_file = "/work_syn/ngs/projects/epitracker/db/development.sqlite3"
 
-chewbbaca_container = "/work_syn/singularity_cache/depot.galaxyproject.org-singularity-chewbbaca-3.3.10--pyhdfd78af_0.img"
-reportree_container = "/work_syn/singularity_cache/mhoeppner-reportree-2.6.0.img"
+chewbbaca_container = "/work_syn/shared/singularity_cache/depot.galaxyproject.org-singularity-chewbbaca-3.3.10--pyhdfd78af_0.img"
+reportree_container = "/work_syn/shared/singularity_cache/mhoeppner-reportree-2.6.0.img"
 
 Epitracker::DBConnection.connect({database: db_file})
 
@@ -81,18 +81,18 @@ clusters.each do |cluster|
         # Step 1: Join profiles into one matrix
         warn "Running JoinProfiles"
         # Chewbbaca join profiles
-        command = "apptainer exec #{chewbbaca_container} chewBBACA.py JoinProfiles -p *.tsv -o alleles.tsv &> /dev/null"
+        command = "singularity exec #{chewbbaca_container} chewBBACA.py JoinProfiles -p *.tsv -o alleles.tsv &> /dev/null"
         system(command)
 
         # Reduce matrix to informative positions and set various non-hit characters to 0
         warn "Running ExtractCgmlst"
         # Chewbbaca clean matrix
-        command = "apptainer exec #{chewbbaca_container} chewBBACA.py ExtractCgMLST -i alleles.tsv --t 0 -o filtered &> /dev/null "
+        command = "singularity exec #{chewbbaca_container} chewBBACA.py ExtractCgMLST -i alleles.tsv --t 0 -o filtered &> /dev/null "
         system(command)
 
         # Run Reportree on clean matrix with settings as used by Bella
         warn "Running Reportree"
-        command = "apptainer exec #{reportree_container} reportree.py -a filtered/cgMLST0.tsv -out cluster_#{cluster.id} --HC-threshold single-1-50 --loci-called 0.95 --analysis HC &> /dev/null"
+        command = "singularity exec #{reportree_container} reportree.py -a filtered/cgMLST0.tsv -out cluster_#{cluster.id} --HC-threshold single-1-50 --loci-called 0.95 --analysis HC &> /dev/null"
         system(command)
 
         # Read the resulting tree file

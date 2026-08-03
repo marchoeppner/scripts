@@ -7,7 +7,6 @@
 
 require 'optparse'
 require 'ostruct'
-require 'json'
 
 ### Get the script arguments and open relevant files
 options = OpenStruct.new()
@@ -21,14 +20,19 @@ opts.on("-h","--help","Display the usage information") {
 
 opts.parse! 
 
-data = JSON.parse(IO.readlines(options.infile).join)
+reports = Dir["*_report.csv"]
 
-# Remove keys that are always unique across files
-data["analysis_info"].delete("finished_script_at")
-data["analysis_info"].delete("started_script_at")
+reports.each do |r|
 
+    lines = IO.readlines(r).map {|l| l.strip }
 
+    header = lines.shift.split(",")
+    data = lines.shift.split(",")
 
-f = File.new(options.outfile, "w+")
-f.puts JSON.pretty_generate(data)
-f.close
+    bucket = {}
+    data.each_with_index do |d,i|
+        bucket[header[i]] = d
+    end
+
+    puts bucket["Sample"] + "\t" + bucket["ContamStatus"].downcase
+end
