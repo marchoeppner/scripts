@@ -117,6 +117,12 @@ def compress_string(data)
 
 end
 
+def build_tree(samples, matrix)
+
+    
+
+end
+
 ### Get the script arguments and open relevant files
 options = OpenStruct.new()
 opts = OptionParser.new()

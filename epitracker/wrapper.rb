@@ -8,12 +8,22 @@
 require 'optparse'
 require 'ostruct'
 require 'date'
+require 'epitracker'
+require 'logger'
+require 'fileutils'
+
+def run_command(cmd)
+
+    system(cmd)
+
+end
 
 ### Get the script arguments and open relevant files
 options = OpenStruct.new()
 opts = OptionParser.new()
 opts.on("-i","--infile", "=SETID","Get info for this set") {|argument| options.set_id = argument }
 opts.on("-o","--outfile", "=OUTFILE","Output file") {|argument| options.outfile = argument }
+opts.on("-d","--db", "=DB","Path to db file") {|argument| options.db = argument }
 opts.on("-h","--help","Display the usage information") {
     puts opts
     exit
@@ -21,8 +31,39 @@ opts.on("-h","--help","Display the usage information") {
 
 opts.parse! 
 
-BASEDIR = "/work_syn/ngs/outbreak/epitracker"
-RUNDIR = "/work_syn/ngs/runs/miseq"
+options.db ? db_file = options.db : db_file = "/work_syn/ngs/projects/epitracker/db/development.sqlite3"
+
+warn "EPITRACKER WRAPPER SUITE"
+warn "Automatically load and cluster genome samples"
+warn "============================================="
+warn ""
+log = Logger.new File.open('epitracker_wrapper.log', 'w+')
+log.level = Logger::INFO
+
+log.info "Connecting to database on #{db_file}"
+
+Epitracker::DBConnection.connect({database: db_file})
+
+# list of prerequisites
+BASEDIR = "/work_syn/ngs/projects/epitracker"
+DATADIR = "/work_syn/ngs/analyses"
+GABI_TO_EPITRACKER = "/home/mhoeppner/git/scripts/epitracker/gabi2epitracker.rb"
+BELLA_TO_EPITRACKER = "/home/mhoeppner/git/scripts/epitracker/bella2epitracker.rb"
+BELLA_VERSION = "1.0.1"
+BELLA_CREATE_ANALYSIS = "/home/mhoeppner/git/scripts/epitracker/create_analysis.rb"
+CLUSTER_TREES = "/home/mhoeppner/git/scripts/epitracker/cluster_trees.rb"
+
+[BASEDIR, DATADIR, GABI_TO_EPITRACKER, BELLA_TO_EPITRACKER, BELLA_CREATE_ANALYSIS].each do |prereq|
+    if !File.exist?(prereq)
+        abort "Missing critical dependency: #{prereq}"
+    end
+end
+
+LOGDIR = Dir.getwd + "/logs"
+FileUtils.mkdir_p(LOGDIR)
+LOGILE = "#{LOGDIR}/logs.txt"
+
+log.info "Starting processing #{Dir.getwd}"
 
 configs = {
     "ecoli" => {
@@ -33,34 +74,99 @@ configs = {
     },
     "senterica" => {
         "schema" => "salmonella --efsa"
-    },  
-    "campylobacter" => {
-        "schema" => "capylobacter"
     }
 }
 
-run_info = {}
-runs = Dir["#{BASEDIR}/2*_*"].map{|d| File.expand_path(d)}
+runs = {}
 
-# Get all gabi runs
-runs.each do |run|
-    #date_info = run.split("_")[0].chars.each_slice(2).map(&:join)
-    date_info = File.basename(run).split("_")[0]
-    date = Date.parse(date_info)
-    run_info[date] = File.new(run)
-end
+worksheet = []
+gabi_folders = Dir["#{DATADIR}/2*_M*/gabi_1.3.0/*/results"].map {|f| File.expand_path(f)}
 
-configs.each do |species, data|
-    warn species
+# ------------------------------------------------
+# Check if any of the GABI results are not yet in the database
+# ------------------------------------------------
 
-    process_runs = []
-    analyses = Dir["#{BASEDIR}/#{species}/*"].map {|a| File.expand_path(a)}.sort_by{|a| File.new(a).ctime}
-    recent_analysis = analyses.last
+log.info "Checking GABI result folders for new samples"
 
-    if recent_analysis
-        puts recent_analysis
-    else
-        puts "No analyses performed yet"
+gabi_folders.each do |path|
+
+    basename = path.split("/")[-4]
+
+    samples = Dir["#{path}/samples/*"].map {|f| File.basename(f)}
+    
+    is_processed = false
+
+    samples.each do |sample|
+        next if is_processed
+        db = Epitracker::Sample.find_by_name(sample)
+        if db
+            is_processed = true
+        end
+    end
+
+    if !is_processed
+        log.info "GABI run #{basename} not yet in database, adding to worksheet."        
+        worksheet << path
     end
 
 end
+
+log.info "Compiled #{worksheet.length} new worksheet entries."
+
+# ------------------------------------------------
+# Load all the new samples into the database
+# ------------------------------------------------
+
+worksheet.each do |path|
+
+    basename = path.split("/")[-4]
+
+    log.info "Loading run #{basename} into database"
+
+    # Load the assemblies into the database
+    command = "ruby #{GABI_TO_EPITRACKER} -i #{path} &> #{LOGILE}"
+    run_command(command)
+
+end
+
+organisms = Epitracker::Organism.all
+
+# ------------------------------------------------
+# Check for each organism if a new Bella analysis is required
+# ------------------------------------------------
+
+organisms.each do |o|
+
+    log.info "Checking data for #{o.name}"
+
+    default_schema = o.cgmlst_schemas.first
+    latest_analysis = default_schema.cluster_analyses.last
+    latest_sample = o.samples.last
+
+    # Run Bella if the latest sample is newer than the latest analysis
+    if !latest_analysis or latest_sample.created_at > latest_analysis.created_at
+        
+        this_date = Date.today.strftime("%F")
+        run_dir = "#{BASEDIR}/#{o.name}/#{this_date}"
+        analysis_dir = "#{run_dir}/data"
+        
+        FileUtils.mkdir_p(analysis_dir)
+        
+        Dir.chdir(run_dir) do |dir|
+            
+            Dir.chdir(analysis_dir) do |adir|
+                command = "ruby #{BELLA_CREATE_ANALYSIS} -s #{default_schema.name} &> #{LOGILE}"
+                run_command(command)
+            end
+
+            # Execute the pipeline script generated by bella create analysis
+            command = "bash data/run.sh &> #{LOGILE}"
+            run_command(command)
+
+            command = "ruby #{BELLA_TO_EPITRACKER} -i results"
+        end
+       
+    end
+end
+
+command = "ruby #{CLUSTER_TREES}"

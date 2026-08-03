@@ -22,6 +22,9 @@ opts.on("-h","--help","Display the usage information") {
     exit
 }
 
+BELLA_VERSION="1.0.1"
+WD = Dir.getwd
+
 opts.parse! 
 
 options.db ? db_file = options.db : db_file = "/work_syn/ngs/projects/epitracker/db/development.sqlite3"
@@ -40,6 +43,10 @@ if !schema
     warn "Not a valid schema, exiting..."
     exit
 end
+
+command = [
+    "nextflow run marchoeppner/bella -profile lsh -r #{BELLA_VERSION}"
+]
 
 ####################################
 # Dump FASTA file for samples without
@@ -70,6 +77,11 @@ if !assemblies_only.empty?
 
         assembly = sample.assemblies.first
 
+        if assembly.assembly_info.qc == "fail"
+            warn "Skipping #{sample.name} due to QC failure"
+            next
+        end
+
         text = assembly.fasta_unzip
     
         f = File.new("#{sample.name}.fasta", "w+")
@@ -82,6 +94,8 @@ if !assemblies_only.empty?
     s.close
 
     pg.finish
+
+    command.append("--input #{WD}/assemblies.tsv")
 end
 
 
@@ -101,8 +115,13 @@ if !profiles.empty?
     profiles.each do |profile|
 
         pg.increment
-    
+
         sample = profile.assembly.sample
+
+        if profile.assemby.assembly_info.qc == "fail"
+            warn "Skipping sample #{sample.name} due to QC failure"
+            next
+        end
 
         text =  Zlib.inflate(Base64.decode64(profile.profile))
     
@@ -118,34 +137,45 @@ if !profiles.empty?
 
     pg.finish
 
+    command.append("--alleles #{WD}/profiles.tsv")
+
 end
 
 ###############################
 # Dump existing nomenclature
 ###############################
 
-analysis = schema.cluster_analyses.last
-if !analysis
-    warn "No analysis linked to this schema, exiting..."
-    exit
-end
+
 partition = schema.cgmlst_partitions.find {|cp| cp.is_default }
 if !partition
     warn "No partitions configured for this schema, exiting..."
     exit
 end
 
-xref = Epitracker::XrefAnalysisPartition.where(cluster_analysis_id: analysis.id, cgmlst_partition_id: partition.id).first
-clusters = xref.clusters
+analysis = schema.cluster_analyses.last
+if !analysis
+    warn "No analysis linked to this schema, not dumping nomenclature"
+else 
+    xref = Epitracker::XrefAnalysisPartition.where(cluster_analysis_id: analysis.id, cgmlst_partition_id: partition.id).first
+    clusters = xref.clusters
 
-if !clusters.empty?
+    if !clusters.empty?
 
-    s = File.new("nomenclature.tsv", "w+")
-    s.puts "sequence\tgroup"
-    clusters.uniq.each do |cluster|
-        cluster.cgmlst_profiles.each do |profile|
-            s.puts "#{profile.assembly.sample.name}\t#{cluster.name}"
+        s = File.new("nomenclature.tsv", "w+")
+        s.puts "sequence\tgroup"
+        clusters.uniq.each do |cluster|
+            cluster.cgmlst_profiles.each do |profile|
+                s.puts "#{profile.assembly.sample.name}\t#{cluster.name}"
+            end
         end
+        s.close
+        command.append("--nomenclature #{WD}/nomenclature.tsv")
     end
-    s.close
+
 end
+
+command.append("--species #{organism.genus.downcase} --efsa --run_name Run")
+
+f = File.new("run.sh", "w+")
+f.puts command.join(" ")
+f.close
