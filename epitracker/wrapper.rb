@@ -40,9 +40,16 @@ warn ""
 log = Logger.new File.open('epitracker_wrapper.log', 'w+')
 log.level = Logger::INFO
 
-log.info "Connecting to database on #{db_file}"
+log.info "Connecting to database on #{db_file}..."
 
 Epitracker::DBConnection.connect({database: db_file})
+
+connection = Epitracker::DBConnection.lease_connection
+
+if !connection
+  log.warn "Could not connect to database!"
+  abort
+end
 
 # list of prerequisites
 BASEDIR = "/work_syn/ngs/projects/epitracker"
@@ -53,8 +60,9 @@ BELLA_VERSION = "1.0.1"
 BELLA_CREATE_ANALYSIS = "/home/mhoeppner/git/scripts/epitracker/create_analysis.rb"
 CLUSTER_TREES = "/home/mhoeppner/git/scripts/epitracker/cluster_trees.rb"
 
-[BASEDIR, DATADIR, GABI_TO_EPITRACKER, BELLA_TO_EPITRACKER, BELLA_CREATE_ANALYSIS].each do |prereq|
+[BASEDIR, DATADIR, GABI_TO_EPITRACKER, BELLA_TO_EPITRACKER, BELLA_CREATE_ANALYSIS, CLUSTER_TREES].each do |prereq|
     if !File.exist?(prereq)
+        log.warn "Failed to find dependency #{prereq}"
         abort "Missing critical dependency: #{prereq}"
     end
 end
@@ -65,26 +73,13 @@ LOGILE = "#{LOGDIR}/logs.txt"
 
 log.info "Starting processing #{Dir.getwd}"
 
-configs = {
-    "ecoli" => {
-        "schema" => "escherichia --efsa"
-    },
-    "listeria" => {
-        "schema" => "listeria"
-    },
-    "senterica" => {
-        "schema" => "salmonella --efsa"
-    }
-}
-
-runs = {}
-
 worksheet = []
-gabi_folders = Dir["#{DATADIR}/2*_M*/gabi_1.3.0/*/results"].map {|f| File.expand_path(f)}
 
 # ------------------------------------------------
-# Check if any of the GABI results are not yet in the database
+# Check if any of the existing GABI results are not yet in the database
 # ------------------------------------------------
+
+gabi_folders = Dir["#{DATADIR}/2*_M*/gabi_1.3.0/*/results"].map {|f| File.expand_path(f)}
 
 log.info "Checking GABI result folders for new samples"
 
@@ -107,6 +102,8 @@ gabi_folders.each do |path|
     if !is_processed
         log.info "GABI run #{basename} not yet in database, adding to worksheet."        
         worksheet << path
+    else
+        log.info "GABI run #{basename} already in database, skipping."
     end
 
 end
@@ -124,7 +121,7 @@ worksheet.each do |path|
     log.info "Loading run #{basename} into database"
 
     # Load the assemblies into the database
-    command = "ruby #{GABI_TO_EPITRACKER} -i #{path} &> #{LOGILE}"
+    command = "ruby #{GABI_TO_EPITRACKER} -i #{path} &>> #{LOGILE}"
     run_command(command)
 
 end
@@ -169,4 +166,6 @@ organisms.each do |o|
     end
 end
 
-command = "ruby #{CLUSTER_TREES}"
+# Now built all the missing cluster trees
+command = "ruby #{CLUSTER_TREES} &>> #{LOGFILE}"
+run_command(command)
