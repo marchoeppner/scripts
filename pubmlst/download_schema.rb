@@ -64,7 +64,7 @@ species.each do |s|
   
     name = s["name"]
 
-    if name.include?("campylobacter")
+    if name.include?(options.species)
       
         dbs = s["databases"]
         

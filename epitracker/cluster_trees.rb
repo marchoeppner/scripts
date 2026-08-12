@@ -68,7 +68,7 @@ clusters.each do |cluster|
         next if samples.length < 3
 
         sample_list = samples.map {|s| s.name }.join(",")
-        puts "#{cluster.name}\t#{analysis.id}\t#{analysis.cgmlst_schema.name}\t#{sample_list}"
+        log.info "#{cluster.name}\t#{analysis.id}\t#{analysis.cgmlst_schema.name}\t#{sample_list}"
 
         # Dump profiles to tsv files so we can run Chewbbaca on them 
         profiles.each do |profile|
@@ -79,19 +79,19 @@ clusters.each do |cluster|
         end
 
         # Step 1: Join profiles into one matrix
-        warn "Running JoinProfiles"
+        log.info "Running JoinProfiles"
         # Chewbbaca join profiles
         command = "singularity exec #{chewbbaca_container} chewBBACA.py JoinProfiles -p *.tsv -o alleles.tsv &> /dev/null"
         system(command)
 
         # Reduce matrix to informative positions and set various non-hit characters to 0
-        warn "Running ExtractCgmlst"
+        log.info "Running ExtractCgmlst"
         # Chewbbaca clean matrix
         command = "singularity exec #{chewbbaca_container} chewBBACA.py ExtractCgMLST -i alleles.tsv --t 0 -o filtered &> /dev/null "
         system(command)
 
         # Run Reportree on clean matrix with settings as used by Bella
-        warn "Running Reportree"
+        log.info "Running Reportree"
         command = "singularity exec #{reportree_container} reportree.py -a filtered/cgMLST0.tsv -out cluster_#{cluster.id} --HC-threshold single-1-50 --loci-called 0.95 --analysis HC &> /dev/null"
         system(command)
 
