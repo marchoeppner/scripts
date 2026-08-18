@@ -194,7 +194,7 @@ samples.each do |sample_path|
   end
   
   metadata.each do |key,value|
-    payload = "\"#{key}\"\t\"#{value}\"\t\"string\""
+    payload = "\"#{key}\" \"#{value}\" \"string\""
     command = "imeta add -d #{BASE_URL}/archive #{payload}"
     if options.pretend
       warn(command)
