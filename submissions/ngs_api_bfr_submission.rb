@@ -40,7 +40,7 @@ wd = Dir.getwd
 
 samples = nil
 if options.samples
-    samples = IO.readlines(options.samples).map {|s| s.strip }
+    samples = options.samples.split(",")
 end
 
 logfile = Logger.new($stdout)
