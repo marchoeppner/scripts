@@ -98,6 +98,19 @@ def json_to_metadata(json)
   
 end
 
+def check_irods_status(path)
+
+  present = false
+
+  command = "ils #{path}"
+  
+  stdout_str, stderr_str, status = Open3.capture3(command)
+  
+  warn "NOT IMPLEMENTED (check_irods_status)"
+  return present
+end
+
+
 ### Get the script arguments and open relevant files
 options = OpenStruct.new()
 opts = OptionParser.new()
@@ -142,65 +155,93 @@ samples = Dir["#{options.input}/samples/*"].map {|f| File.expand_path(f)}
 
 samples.each do |sample_path|
   
+  # switch to check if this sample can be booked into iRODS
+  skip = false
+
+  log.info "Processing data for #{sample_path}"
+    
   json_file =  Dir["#{sample_path}/*.json"].first
-  next unless json_file
+
+  if !json_file
+    log.warn "Missing JSON file, skipping..."
+    skip = true
+  end
 
   json = JSON.parse(IO.readlines(json_file).join)
+
+  sample = json["sample"]
+
+  archive = "#{sample}.tar.gz"
+
+  log.info "Checking if this archive is already in iRODS"
+
+  in_irods = check_irods_status("#{BASE_URL}/#{archive}")
+
+  if in_irods
+    log.warn "File already in iRODS, skipping..."
+    skip = true
+  end
+
+  log.info "File not found in iRODS, proceeding..."
 
   metadata = json_to_metadata(json)
 
   assembly = "#{sample_path}/assembly/#{json['sample']}.fasta"
 
-  next unless File.exist?(assembly)
-
-  warn assembly
-
-  sample = json["sample"]
-
-  metadata_file = "#{sample}.metadata"
-  f = File.new("#{metadata_file}", "w+")
-  metadata.each do |key,value|
-    f.puts "#{key}\t#{value}"
+  if !File.exist?(assembly)
+    log.warn "Assembly missing from this sample (#{sample}), skipping.."
+    skip = true
   end
-  f.close
 
-  manifest = [ json_file, assembly, metadata_file ]
+  if skip
+    log.warn "This sample (#{sample}) was flagged as skippable, moving on..."
+  else
 
-  archive = "#{sample}.tar.gz"
-  command = "tar -czvf #{archive} #{manifest.join(' ')}"
-  run(command)
-
-  status = check_archive(archive)
-
-  abort "Failed to create valid tar archive for #{sample}" unless status
-
-  md5sum = "#{archive}.md5"
-  command = "md5sum #{archive} > #{md5sum}"
-  run(command)
-
-  # Transfer to irods
-  commands = [
-    "iput #{archive} #{BASE_URL}/#{archive}",
-    "iput #{md5sum} #{BASE_URL}/#{md5sum}",
-    "iput #{metadata_file} #{BASE_URL}/#{metadata_file}"
-  ]
-
-  commands.each do |command|
-    if options.pretend
-      warn(command)
-    else
-      run(command)
+    metadata_file = "#{sample}.metadata"
+    f = File.new("#{metadata_file}", "w+")
+    metadata.each do |key,value|
+      f.puts "#{key}\t#{value}"
     end
-  end
+    f.close
+
+    manifest = [ json_file, assembly, metadata_file ]
+
+    command = "tar -czvf #{archive} #{manifest.join(' ')}"
+    run(command)
+
+    status = check_archive(archive)
+
+    abort "Failed to create valid tar archive for #{sample}" unless status
+
+    md5sum = "#{archive}.md5"
+    command = "md5sum #{archive} > #{md5sum}"
+    run(command)
+
+    # Transfer to irods
+    commands = [
+      "iput #{archive} #{BASE_URL}/#{archive}",
+      "iput #{md5sum} #{BASE_URL}/#{md5sum}",
+      "iput #{metadata_file} #{BASE_URL}/#{metadata_file}"
+    ]
+
+    commands.each do |command|
+      if options.pretend
+        warn(command)
+      else
+        run(command)
+      end
+    end
   
-  metadata.each do |key,value|
-    payload = "\"#{key}\" \"#{value}\" \"string\""
-    command = "imeta add -d #{BASE_URL}/archive #{payload}"
-    if options.pretend
-      warn(command)
-    else
-      run(command)
+    metadata.each do |key,value|
+      payload = "\"#{key}\" \"#{value}\" \"string\""
+      command = "imeta add -d #{BASE_URL}/archive #{payload}"
+      if options.pretend
+        warn(command)
+      else
+        run(command)
+      end
     end
-  end
+
+  end # skip
 
 end

@@ -79,6 +79,16 @@ def json_to_metadata(json)
   
 end
 
+def check_irods_status(path)
+  present = false
+
+  command = "ils #{path}"
+  
+  warn "NOT IMPLEMENTED (check_irods_status)"
+
+  return present
+end
+
 ### Get the script arguments and open relevant files
 options = OpenStruct.new()
 opts = OptionParser.new()
@@ -94,7 +104,7 @@ opts.on("-h","--help","Display the usage information") {
 opts.parse! 
 
 date = Date.today.strftime("%F")
-logfile = "gabi2irods_#{date}.log"
+logfile = "bella2irods_#{date}.log"
 user = `whoami`
 
 log = Logger.new File.open(logfile, 'w+')
@@ -135,6 +145,10 @@ samples.each do |sample_path|
     # This is by pipeline convention, but not very elegant...
     sample = sample_path.split("/")[-1]
 
+    irods_status = check_irods_status("#{BASE_URL}/#{sample}.tar.gz")
+
+    next if irods_status
+
     sample_meta = json["loci_report"].find {|l| l["samples"] == sample }
 
     next unless sample_meta
@@ -174,9 +188,9 @@ samples.each do |sample_path|
 
     commands.each do |command|
         if options.pretend
-        warn(command)
+          warn(command)
         else
-        run(command)
+          run(command)
         end
     end
   
