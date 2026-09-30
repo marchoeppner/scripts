@@ -38,7 +38,10 @@ wd = Dir.getwd
 # Logging
 # ------------
 
-options.samples ? samples = options.samples.split(",") : nil
+samples = nil
+if options.samples
+    samples = IO.readlines(options.samples).map {|s| s.strip }
+end
 
 logfile = Logger.new($stdout)
 logfile.level = Logger::INFO
@@ -121,8 +124,19 @@ jsons.each do |json|
 
     sample = j["sample"]
     
-    # Skip this sample if it isnt part of the sample list
-    next if samples && !samples.include?(sample)
+    process = true
+
+    if samples
+        matches = samples.select {|s| sample.include?(s)}
+        if matches.empty?
+            process = false
+        end
+    end
+
+    if !process
+        warn "Skipping sample #{sample} - not in filter list"
+        next
+    end
 
     species = j["taxon"]
     qc = j["qc"]["call"]
@@ -148,7 +162,7 @@ end
 
 species_seen.uniq!
 
-console_logger.info "Creating folders and staging reads"
+console_logger.info "Creating folders and staging reads for #{species_seen.join(',')}" 
 
 species_seen.each do |s|
     make_folder(s)
@@ -179,7 +193,7 @@ end
 species_seen.each do |species|
 
     Dir.chdir(species) do |dir|
-        command = "md5sum *.fastq.gz > md5sums"
+        command = "md5sum *.fastq.gz > md5_A10.txt"
         console_logger.info "Creating md5sums in #{species}"
         if !pretend
             system(command)
