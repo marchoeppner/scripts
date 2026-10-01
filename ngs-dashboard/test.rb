@@ -55,7 +55,7 @@ def rest_post(url, payload)
     end
 
     begin
-        response = RestClient.post "#{$server}/#{url}", payload, {:accept => :json}
+        response = RestClient.patch "#{$server}/#{url}", payload, {:accept => :json}
 
         $last_request_time = Time.now
         JSON.parse(response)
@@ -90,6 +90,6 @@ jobs = rest_get("jobs")
 
 jobs.each do |job|
     job_id = rand(0..1000)
-    payload = { "job_id" => job_id , "status" => "updated"}
-    rest_post("jobs/#{job["id"]}/update", payload)
+    payload = { job: { id: job["id"], job_id: job_id , status: "updated"} } 
+    rest_post("jobs/#{job["id"]}", payload)
 end
