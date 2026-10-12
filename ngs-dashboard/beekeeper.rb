@@ -9,214 +9,149 @@ require 'optparse'
 require 'ostruct'
 require 'rest_client'
 require 'json'
+require 'fileutils'
 
-def rest_get(url)
-	
-    $request_counter ||= 0   # Initialise if unset  
-    $last_request_time ||= 0 # Initialise if unset
+# Configuration
+$server = 'localhost:3001/api/v1'
 
-    # Rate limiting: Sleep for the remainder of a second since the last request on every third request
-    $request_counter += 1
-    if $request_counter == 15 
+# Rate limiting metrics
+$request_counter = 0
+$last_request_time = 0
+
+def rest_request(method, url, payload = nil)
+  $request_counter += 1
+  if $request_counter == 15
     diff = Time.now - $last_request_time
-    sleep(1-diff) if diff < 1
+    sleep(1 - diff) if diff < 1
     $request_counter = 0
+  end
+
+  begin
+    full_url = "#{$server}/#{url}"
+    response = if method == :get
+        RestClient.get(full_url, accept: :json)
+    else
+        RestClient.patch(full_url, payload, accept: :json)
     end
 
-    begin
-        response = RestClient.get "#{$server}/#{url}", {:accept => :json}
+    $last_request_time = Time.now
+    JSON.parse(response)
+  rescue RestClient::Exception => e
+    warn 'Failed for ' + url + '! ' + (response ? "Status code: #{response}. " : '') + 'Reason: ' + e.message
 
-        $last_request_time = Time.now
-        JSON.parse(response)
-    rescue RestClient::Exception => e
-        puts "Failed for #{url}! #{response ? "Status code: #{response}. " : ''}Reason: #{e.message}"
-
-        # Sleep for specified number of seconds if there is a Retry-After header
-        if e.response.headers[:retry_after]
-            sleep(e.response.headers[:retry_after].to_f)
-            retry # This retries from the start of the begin block
-        else
-            abort("Quitting... #{e.inspect}")
-        end
+    if e.response&.headers&.[](:retry_after)
+      sleep(e.response.headers[:retry_after].to_f)
+      retry
+    else
+      abort("Quitting... #{e.inspect}")
     end
-end
-
-def rest_post(url, payload)
-	
-    $request_counter ||= 0   # Initialise if unset  
-    $last_request_time ||= 0 # Initialise if unset
-
-    # Rate limiting: Sleep for the remainder of a second since the last request on every third request
-    $request_counter += 1
-    if $request_counter == 15 
-    diff = Time.now - $last_request_time
-    sleep(1-diff) if diff < 1
-    $request_counter = 0
-    end
-
-    begin
-        response = RestClient.patch "#{$server}/#{url}", payload, {:accept => :json}
-
-        $last_request_time = Time.now
-        JSON.parse(response)
-    rescue RestClient::Exception => e
-        puts "Failed for #{url}! #{response ? "Status code: #{response}. " : ''}Reason: #{e.message}"
-
-        # Sleep for specified number of seconds if there is a Retry-After header
-        if e.response.headers[:retry_after]
-            sleep(e.response.headers[:retry_after].to_f)
-            retry # This retries from the start of the begin block
-        else
-            abort("Quitting... #{e.inspect}")
-        end
-    end
+  end
 end
 
 def build_slurm_script(job)
+  sbatch_boilerplate = <<~SCRIPT
+    #!/bin/bash
+    #SBATCH -J Job-#{job['id']}
+    #SBATCH --nodes=1
+    #SBATCH --time=10:00:00
+    #SBATCH --mem=4000
+    #SBATCH --ntasks=1
+    #SBATCH -e slurm.err
+    #SBATCH --cpus-per-task=1
+    #{job['command']}
+  SCRIPT
 
-    command = job["command"]
-    sbatch_boilerplate = [
-        "#!/bin/bash",
-        "#SBATCH -J #{job['name']}",
-        "#SBATCH --nodes=1",
-        "#SBATCH --time=10:00:00",
-        "#SBATCH --mem=4000",
-        "#SBATCH --ntasks=1",
-        "#SBATCH -e slurm.err",
-        "#SBATCH --cpus-per-task=1"
-    ]
-
-    s = File.new("slurm.sh", "w+")
-    sbatch_boilerplate.each {|l| s.puts l }
-    s.puts command
-    s.close
-
-    return "slurm.sh"
-
+  File.write("slurm.sh", sbatch_boilerplate)
+  "slurm.sh"
 end
 
 def submit_job(file)
-
-    slurm_id = `sbatch #{file}`.slice(/\d+/)
-    return slurm_id.to_i
-
+  `sbatch #{file}`.slice(/\d+/).to_i
 end
 
 def get_status(slurm_id)
+  status = `scontrol show job #{slurm_id}` rescue ""
+  return "unknown" if status.empty?
 
-    status = `scontrol show job #{slurm_id}`
-    
-    if status == ""
-        return "unkown"
-    else
-        job_state = status.slice(/JobState=[A-Z]*/).split("=")[-1].downcase
-        return job_state
-    end
-
+  status.slice(/JobState=[A-Z]*/)&.split("=")&.last&.downcase || "unknown"
 end
 
-def find_report(job)
+def find_file(job, extension, filter_keywords = [])
+  reports_dir = File.join(job["run_path"], "results", "reports")
+  return nil unless File.directory?(reports_dir)
 
-    run_dir = job["run_dir"]
+  files = Dir[File.join(reports_dir, "*.#{extension}")]
+  return files.first if files.length == 1
 
-    report = nil
-
-    if File.directory?("#{job['run_dir']}/results/reports")
-        htmls = Dir["#{run_dir}/results/reports/*.html"]
-        warn htmls.inspect
-        if htmls.length > 1
-            report = htmls.find{|h| !h.include?("multiqc") && !h.include?("illumina") && !h.include?("nanopore")}
-        elsif htmls.length == 1
-            report = htmls.shift
-        end
-    end
-
-    if report
-        return File.expand_path(report)
-    else
-        return nil
-    end
-
+  files.find { |f| filter_keywords.none? { |kw| f.include?(kw) } } if files.length > 1
 end
 
-### Get the script arguments and open relevant files
-options = OpenStruct.new()
-opts = OptionParser.new()
-opts.on("-o","--outfile", "=OUTFILE","Output file") {|argument| options.outfile = argument }
-opts.on("-h","--help","Display the usage information") {
-    puts opts
-    exit
-}
+### Main Argument Parsing
+options = OpenStruct.new
+opts = OptionParser.new do |o|
+  o.on("-o", "--outfile =OUTFILE", "Output file") { |arg| options.outfile = arg }
+  o.on("-h", "--help", "Display the usage information") { puts o; exit }
+end
+opts.parse!
 
-opts.parse! 
-
-# The ngs-dashboard REST endpoint
-$server	= 'localhost:3000/api/v1'
-
-jobs = rest_get("jobs")
+# Process jobs
+jobs = rest_request(:get, "jobs")
 
 jobs.each do |job|
+  case job["status"]
+  when "created"
+    warn "Found new job - submitting"
+    job_id = nil
+    Dir.chdir(job["run_path"]) do
+      file = build_slurm_script(job)
+      job_id = submit_job(file)
+    end
+    payload = { job: { id: job["id"], job_id: job_id, status: "submitted" } }
+    rest_request(:patch, "jobs/#{job['id']}", payload)
 
-    status = job["status"]
+  when "submitted", "running", "pending"
+    warn "Active job #{job['slurm_id']}, updating status..."
+    status = get_status(job["job_id"])
+    payload = { job: { id: job["id"], status: status, log: File.join(job['run_path'], "slurm.err") } }
+    rest_request(:patch, "jobs/#{job['id']}", payload)
 
-    case status
-    when "created"
-        # submit the job
-        warn "Found new job - submitting"
-        job_id = nil
-        Dir.chdir(job["run_dir"]) do |dir|
-            file = build_slurm_script(job)
-            job_id = submit_job(file)
-        end
-        payload = { job: { id: job["id"], job_id: job_id , status: "submitted"} }
-        rest_post("jobs/#{job['id']}/update", payload)
-    when "submitted" || "running" || "pending"
-        # update job
-        warn "Active job #{job['slurm_id']}, updating status..."
-        status = get_status(job["job_id"])
-        payload = { job: { id: job["id"], status: status} }
-        if !job["log"]
-            payload["log"] = "#{job['run_dir']}/slurm.err"
-        end
-        rest_post("jobs/#{job['id']}/update", payload)
-    when "failed"
-        # resubmit if applicable
-        warn "Failed job #{job['slurm_id']}..."
-        if job["attempts"] < 3
-            warn "\tResubmitting!"
-            job_id = nil
-            Dir.chdir(job["run_dir"]) do |dir|
-                job_id = submit_job("slurm.sh")
-            end  
-            attempts = job["attempts"].to_i+1
-            payload = { job: { id: job["id"], status: "submitted", attempts: attempts, job_id: job_id} }
-            rest_post("jobs/#{job['id']}/update", payload)
-        end
-    when "complete"
-        if !job["completed"]
-          
-            # remove the work directory
-            wd = "#{job['run_dir']}/work"
-            if File.directory?(wd)
-                system("rm -Rf #{wd}")
-            end
-            payload = { job: { id: job["id"], complete: true } }
-            # if no report has been attached to this job, try and do that now
-            if !job["report"] && job["command"].include?("nextflow")
-                report = find_report(job)
-                if report
-                    payload[job_id:][report:  report]
-                end
-            end
-            rest_post("jobs/#{job['id']}", payload)
-
-            if job["depends_on"]
-                { job: { is_archived: true } }
-                rest_post("jobs/#{job['depends_on']}", payload)
-            end
-
-        end
-        # Stage out
+  when "failed"
+    warn "Failed job #{job['slurm_id']}..."
+    if job["attempts"].to_i < 3
+      warn "\tResubmitting!"
+      job_id = nil
+      Dir.chdir(job["run_path"]) { job_id = submit_job("slurm.sh") }
+      payload = { job: { id: job["id"], status: "submitted", attempts: job["attempts"].to_i + 1, job_id: job_id } }
+      rest_request(:patch, "jobs/#{job['id']}", payload)
     end
 
+  when "completed"
+
+    next if job["completed"]
+    
+    # Securely remove the work directory
+    wd = File.join(job['run_path'], "work")
+    FileUtils.rm_rf(wd) if File.directory?(wd)
+
+    payload = { job: { id: job["id"], completed: true } }
+
+    if !job["report"] && job["command"].include?("nextflow")
+      report = find_file(job, "html", %w[multiqc illumina nanopore krona])
+      payload[:job][:report] = File.expand_path(report) if report
+    end
+
+    rest_request(:patch, "jobs/#{job['id']}", payload)
+
+    if job["depends_on"]
+      rest_request(:patch, "jobs/#{job['depends_on']}", { job: { is_archived: true } })
+    end
+
+    if job["command"].include?("read-qc")
+      json = find_file(job, "json", [])
+      if json
+        payload = { run: { id: job["run_id"], qc_json: JSON.load_file(json) } }
+        rest_request(:patch, "/runs/#{job['run_id']}", payload)
+      end
+    end
+  end
 end

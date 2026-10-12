@@ -87,7 +87,7 @@ log.info "Performing a backup of the current database..."
 backup_name = File.basename(db_file) + ".bak"
 database_backup = Dir.getwd + "/backup/#{backup_name}"
 
-File.mkdir_p("backup")
+FileUtils.mkdir_p("backup")
 command = "cp #{db_file} backup/#{backup_name}"
 system(command)
 
