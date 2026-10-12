@@ -9,6 +9,8 @@ require 'optparse'
 require 'ostruct'
 require 'rest_client'
 require 'json'
+require "zlib"
+require 'base64'
 
 def rest_get(url)
 	
@@ -70,6 +72,15 @@ def rest_post(url, payload)
             abort("Quitting... #{e.inspect}")
         end
     end
+end
+
+def compress_string(data)
+
+    compressed_data = Zlib::Deflate.deflate(data)
+    encoded_data = Base64.encode64(compressed_data)
+
+    return encoded_data
+
 end
 
 def build_slurm_script(job)
@@ -135,6 +146,24 @@ def find_report(job)
         return File.expand_path(report)
     else
         return nil
+    end
+
+end
+
+def load_qc(job)
+  
+    json = nil
+    if File.directory?("#{job['run_dir']}/results/reports")
+      jsons = Dir["#{job['run_dir']}/results/reports/*.json"]
+      if json.length > 0
+        json = jsons.first
+      end
+    end
+
+    if json
+      json_b = compress_string(IO.readlines(json).join)
+      payload = { run: { id: job["run_id"], qc_json: json_b } } 
+      rest_put("run/#{job['run_id']}", payload)
     end
 
 end
