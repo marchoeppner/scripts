@@ -118,7 +118,7 @@ if !profiles.empty?
 
         sample = profile.assembly.sample
 
-        if profile.assemby.assembly_info.qc == "fail"
+        if profile.assembly.assembly_info.qc == "fail"
             warn "Skipping sample #{sample.name} due to QC failure"
             next
         end

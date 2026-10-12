@@ -9,6 +9,8 @@ require 'optparse'
 require 'ostruct'
 require 'rest_client'
 require 'json'
+require "zlib"
+require 'base64'
 
 def rest_get(url)
 	
@@ -72,9 +74,19 @@ def rest_post(url, payload)
     end
 end
 
+def compress_string(data)
+
+    compressed_data = Zlib::Deflate.deflate(data)
+    encoded_data = Base64.encode64(compressed_data)
+
+    return encoded_data
+
+end
+
 ### Get the script arguments and open relevant files
 options = OpenStruct.new()
 opts = OptionParser.new()
+opts.on("-j","--json", "=JSON","JSON file") {|argument| options.json = argument }
 opts.on("-o","--outfile", "=OUTFILE","Output file") {|argument| options.outfile = argument }
 opts.on("-h","--help","Display the usage information") {
     puts opts
@@ -83,13 +95,14 @@ opts.on("-h","--help","Display the usage information") {
 
 opts.parse! 
 
-$server	= 'localhost:3000/api/v1'
+$server	= 'localhost:3001/api/v1'
 
-jobs = rest_get("jobs")
+json_string = JSON.load_file(options.json)
 
+run = rest_get("runs/1")
 
-jobs.each do |job|
-    job_id = rand(0..1000)
-    payload = { job: { id: job["id"], job_id: job_id , status: "updated"} } 
-    rest_post("jobs/#{job["id"]}", payload)
-end
+run_id = run["id"]
+
+payload = { run: { id: run_id, qc_json: json_string } }
+
+update = rest_post("/runs/#{run_id}", payload)

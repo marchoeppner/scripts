@@ -50,7 +50,7 @@ clusters.each do |cluster|
         # Skip if this cross-link already has the tree object. 
         
         if xref_apc.tree
-          warn "This Cluster (#{cluster.name}, #{cluster.cgmlst_partition.cgmlst_schema.organism.name}) and analysis already have a tree - skipping"
+          log.warn "This Cluster (#{cluster.name}, #{cluster.cgmlst_partition.cgmlst_schema.organism.name}) and analysis already have a tree - skipping"
           next
         end
 
