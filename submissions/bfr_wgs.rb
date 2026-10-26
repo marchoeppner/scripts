@@ -98,7 +98,7 @@ unless Dir.exist?(raw_data_folder)
 end
 console_logger.info "Raw data folder present"
 
-fastqs = Dir["#{raw_data_folder}/Alignment_1/*/Fastq/*.fastq.gz"]
+fastqs = Dir["#{raw_data_folder}/Alignment_*/*/Fastq/*.fastq.gz"]
 if fastqs.empty?
     msg = "No FastQ files found!"
     console_logger.warn msg

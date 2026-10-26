@@ -102,7 +102,7 @@ analysis_date = options.date ? Date.parse(options.date) : nil
 Epitracker::DBConnection.connect(database: db_file)
 
 basename = File.basename(options.input)
-log = Logger.new("bella_#{basename}.log", 'w')
+log = Logger.new("bella_#{basename}.log")
 log.level = Logger::INFO
 
 # Validate that this is actually a Bella result
