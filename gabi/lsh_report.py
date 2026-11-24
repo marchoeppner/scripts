@@ -13,6 +13,7 @@ from reportlab.lib import colors
 
 from datetime import date
 
+REPORT_VERSION = "1.0"
 
 def get_status(key, reference):
 
@@ -220,7 +221,7 @@ if confindr["illumina"] and len(confindr["illumina"][0]) > 0:
 ##############################
 # PDF construction starts here
 ##############################
-disclaimer = f"Anlage zur Gesamtgenome-Sequenzierung von {sample}"
+disclaimer = f"Anlage zur Gesamtgenom-Sequenzierung von {sample}"
 
 content.append(Paragraph(disclaimer, styles["Normal"]))
 content.append(Spacer(1, 12))
