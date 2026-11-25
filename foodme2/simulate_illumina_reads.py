@@ -1,28 +1,44 @@
 #!/usr/bin/env python3
 """
 Simulate demultiplexed Illumina paired-end (R1/R2) metabarcoding amplicon reads
-with a realistic position-dependent substitution error profile and R2 quality decay.
+with cycle-dependent error modeling for XLEAP-SBS and Legacy SBS chemistries.
 """
 
 import argparse
+import bisect
 import csv
 import math
 import random
 import sys
 from pathlib import Path
 
-# Illumina Sequencing-by-Synthesis Error Profile (MiSeq / NextSeq / NovaSeq)
-ILLUMINA_PROFILE = {
-    "r1_base_err": 0.0008,      # ~0.08% error at 5' start (~Q31)
-    "r1_end_err": 0.0150,       # ~1.5% error at 3' end (~Q18)
-    "r2_base_err": 0.0012,      # R2 starts slightly noisier (~Q29)
-    "r2_end_err": 0.0300,       # R2 decays steeper at 3' end (~Q15)
-    "decay_exponent": 2.4,      # Exponential quality drop-off along read cycle
-    "indel_fraction": 0.01,     # ~1% of total errors are indels; ~99% are substitutions
-    "chimera_rate": 0.01,       # 1% PCR chimera rate
+# Cycle-driven Chemistry Error Profiles
+PROFILES = {
+    # Modern XLEAP-SBS (NovaSeq X / NextSeq 1000/2000): Flat through 300+ cycles
+    "xleap": {
+        "r1_base_err": 0.0002,       # ~Q37 baseline
+        "r2_base_err": 0.0003,       # ~Q35 baseline
+        "per_cycle_drift": 1.0e-6,   # Minimal linear drift per cycle
+        "decay_onset_cycle": 280,    # Almost no tail spike within standard 2x150 or 2x300
+        "tail_ramp_rate": 1.5e-5,    # Gentle rise only beyond onset
+        "decay_exponent": 1.8,
+        "indel_fraction": 0.005,     # ~0.5% of errors are indels
+        "max_q": 42,                 # XLEAP frequently reports Q40+ scores
+    },
+    # Legacy SBS (MiSeq v3 / older NextSeq): Low up to ~220 bp, steep decay >250 bp
+    "legacy": {
+        "r1_base_err": 0.0008,       # ~Q31 baseline
+        "r2_base_err": 0.0012,       # ~Q29 baseline
+        "per_cycle_drift": 6.0e-6,   # Gradual phasing drift in early/mid cycles
+        "decay_onset_cycle": 220,    # Steep degradation kicks in approaching >250 bp
+        "tail_ramp_rate": 3.5e-4,    # Heavy tail penalty past onset
+        "decay_exponent": 2.2,
+        "indel_fraction": 0.01,      # ~1% of errors are indels
+        "max_q": 40,
+    },
 }
 
-# Illumina-typical substitution bias (A<->C and G<->T transversions are slightly elevated)
+# Illumina-typical substitution bias (A<->C and G<->T transversions slightly elevated)
 SUB_MATRIX = {
     "A": [("C", 0.40), ("G", 0.35), ("T", 0.25)],
     "C": [("A", 0.40), ("T", 0.35), ("G", 0.25)],
@@ -97,8 +113,8 @@ def load_abundance_table(filepath: Path, targets: list[tuple[str, str]]) -> list
     return weights
 
 
-def phred_char(q_score: float) -> str:
-    q_clamped = max(2, min(40, int(round(q_score))))
+def phred_char(q_score: float, max_q: int = 40) -> str:
+    q_clamped = max(2, min(max_q, int(round(q_score))))
     return chr(q_clamped + 33)
 
 
@@ -116,19 +132,24 @@ def simulate_illumina_single(
     amplicon: str, max_read_len: int, is_r2: bool, profile: dict
 ) -> tuple[str, str]:
     """
-    Simulate a single R1 or R2 read up to max_read_len with 3' exponential error decay.
-    If the amplicon is shorter than max_read_len, sequencing stops at the amplicon end.
+    Simulate a single R1 or R2 read where error rate is driven by absolute cycle index
+    rather than normalized read length, keeping <=250 bp reads accurate while penalizing >250 bp tails.
     """
     template = amplicon[:max_read_len]
     effective_len = len(template)
 
     base_err = profile["r2_base_err"] if is_r2 else profile["r1_base_err"]
-    end_err = profile["r2_end_err"] if is_r2 else profile["r1_end_err"]
+    r2_mult = 1.6 if is_r2 else 1.0
+    drift = profile["per_cycle_drift"] * r2_mult
+    onset = profile["decay_onset_cycle"]
+    ramp = profile["tail_ramp_rate"] * r2_mult
     exp = profile["decay_exponent"]
     indel_frac = profile["indel_fraction"]
+    max_q = profile.get("max_q", 40)
 
-    # Slight cluster-to-cluster signal intensity variance
-    cluster_mult = random.gammavariate(9.0, 1.0 / 9.0)
+    # Tighter cluster-to-cluster signal variance for patterned flow cells (XLEAP)
+    gamma_shape = 16.0 if max_q > 40 else 9.0
+    cluster_mult = random.gammavariate(gamma_shape, 1.0 / gamma_shape)
 
     out_bases = []
     out_quals = []
@@ -139,16 +160,20 @@ def simulate_illumina_single(
         if base not in "ACGT":
             base = random.choice("ACGT")
 
-        # Scale error curve against the nominal sequencing run length
-        rel_pos = idx / max(1, max_read_len - 1)
-        p_err = (base_err + (end_err - base_err) * (rel_pos ** exp)) * cluster_mult
-        p_err = max(1e-5, min(0.45, p_err))
+        # 1. Gentle baseline drift by absolute cycle number
+        p_err = base_err + (idx * drift)
+
+        # 2. Tail decay only triggers once cycle exceeds the chemistry's onset threshold
+        if idx > onset:
+            excess_cycles = (idx - onset) / 50.0  # scaled per 50 bp past onset
+            p_err += ramp * (excess_cycles ** exp)
+
+        p_err = max(1e-5, min(0.45, p_err * cluster_mult))
 
         expected_q = -10.0 * math.log10(p_err)
         roll = random.random()
 
         if roll < p_err:
-            # Rare indel vs dominant substitution
             if random.random() < indel_frac and idx < effective_len - 1:
                 if random.random() < 0.5:
                     # 1 bp deletion
@@ -157,22 +182,30 @@ def simulate_illumina_single(
                 else:
                     # 1 bp insertion
                     out_bases.append(random.choice("ACGT"))
-                    out_quals.append(phred_char(random.gauss(expected_q - 6.0, 2.5)))
+                    out_quals.append(phred_char(random.gauss(expected_q - 6.0, 2.5), max_q))
                     if len(out_bases) >= max_read_len:
                         break
             # Substitution
             mut_base = weighted_choice(SUB_MATRIX[base])
             out_bases.append(mut_base)
             q = random.gauss(expected_q - 8.0, 3.0)
-            out_quals.append(phred_char(q))
+            out_quals.append(phred_char(q, max_q))
         else:
             out_bases.append(base)
-            q = random.gauss(expected_q, 2.0)
-            out_quals.append(phred_char(q))
+            q = random.gauss(expected_q, 1.5 if max_q > 40 else 2.0)
+            out_quals.append(phred_char(q, max_q))
 
         idx += 1
 
     return "".join(out_bases), "".join(out_quals)
+
+
+def make_chimera(seq1: str, seq2: str) -> str:
+    min_len = min(len(seq1), len(seq2))
+    if min_len < 20:
+        return seq1
+    breakpoint = random.randint(int(min_len * 0.2), int(min_len * 0.8))
+    return seq1[:breakpoint] + seq2[breakpoint:]
 
 
 def main():
@@ -183,6 +216,12 @@ def main():
     parser.add_argument("-o", "--out-prefix", required=True, type=str, help="Output prefix (creates _R1.fastq and _R2.fastq)")
     parser.add_argument("-n", "--num-pairs", type=int, default=10000, help="Number of read pairs to simulate (default: 10000)")
     parser.add_argument("-l", "--read-length", type=int, default=250, help="Maximum read length in bp for R1 and R2 (default: 250)")
+    parser.add_argument(
+        "--chemistry",
+        choices=["xleap", "legacy"],
+        default="xleap",
+        help="Illumina sequencing chemistry error profile (default: xleap)",
+    )
     parser.add_argument(
         "--abundance",
         choices=["uniform", "lognormal"],
@@ -206,6 +245,7 @@ def main():
     args = parser.parse_args()
 
     random.seed(args.seed)
+    profile = PROFILES[args.chemistry]
     targets = parse_fasta(args.input)
     if not targets:
         sys.exit("Error: No valid FASTA records found.")
@@ -226,49 +266,36 @@ def main():
         acc += p
         cum_probs.append(acc)
 
-    def pick_target():
-        r = random.random()
-        for idx, cp in enumerate(cum_probs):
-            if r <= cp:
-                return targets[idx]
-        return targets[-1]
+    def pick_target() -> tuple[str, str]:
+        idx = bisect.bisect_left(cum_probs, random.random())
+        return targets[min(idx, len(targets) - 1)]
 
     r1_path = Path(f"{args.out_prefix}_R1.fastq")
     r2_path = Path(f"{args.out_prefix}_R2.fastq")
 
-    with open(r1_path, "w", encoding="utf-8") as fq1, open(r2_path, "w", encoding="utf-8") as fq2:
-        for pair_idx in range(1, args.num_pairs + 1):
+    with open(r1_path, "w", encoding="utf-8") as f_r1, open(r2_path, "w", encoding="utf-8") as f_r2:
+        for i in range(1, args.num_pairs + 1):
+            header, seq = pick_target()
+
             if len(targets) > 1 and random.random() < args.chimera_rate:
-                h1, s1 = pick_target()
-                h2, s2 = pick_target()
-                bp1 = random.randint(len(s1) // 4, 3 * len(s1) // 4)
-                bp2 = random.randint(len(s2) // 4, 3 * len(s2) // 4)
-                amplicon_seq = s1[:bp1] + s2[bp2:]
-                source_label = f"chimera_{h1}_x_{h2}"
-            else:
-                header, amplicon_seq = pick_target()
-                source_label = header
+                header2, seq2 = pick_target()
+                if header2 != header:
+                    seq = make_chimera(seq, seq2)
+                    header = f"{header}_chimera_{header2}"
 
-            strand = "+"
             if args.mixed_orientation and random.random() < 0.5:
-                amplicon_seq = rev_comp(amplicon_seq)
-                strand = "-"
+                fwd_template = rev_comp(seq)
+                rev_template = seq
+            else:
+                fwd_template = seq
+                rev_template = rev_comp(seq)
 
-            r1_seq, r1_qual = simulate_illumina_single(
-                amplicon_seq, args.read_length, is_r2=False, profile=ILLUMINA_PROFILE
-            )
-            r2_seq, r2_qual = simulate_illumina_single(
-                rev_comp(amplicon_seq), args.read_length, is_r2=True, profile=ILLUMINA_PROFILE
-            )
+            r1_seq, r1_qual = simulate_illumina_single(fwd_template, args.read_length, is_r2=False, profile=profile)
+            r2_seq, r2_qual = simulate_illumina_single(rev_template, args.read_length, is_r2=True, profile=profile)
 
-            base_header = f"@sim_illumina_2x{args.read_length}_{pair_idx:06d} source={source_label} strand={strand}"
-            fq1.write(f"{base_header} 1:N:0:1\n{r1_seq}\n+\n{r1_qual}\n")
-            fq2.write(f"{base_header} 2:N:0:1\n{r2_seq}\n+\n{r2_qual}\n")
-
-    print(
-        f"Done. Simulated {args.num_pairs} paired-end 2x{args.read_length} bp reads "
-        f"from {len(targets)} targets -> {r1_path} & {r2_path}"
-    )
+            read_id = f"@SIM:{i}:{header}"
+            f_r1.write(f"{read_id} 1:N:0:1\n{r1_seq}\n+\n{r1_qual}\n")
+            f_r2.write(f"{read_id} 2:N:0:1\n{r2_seq}\n+\n{r2_qual}\n")
 
 
 if __name__ == "__main__":

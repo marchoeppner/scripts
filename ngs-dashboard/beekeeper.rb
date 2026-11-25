@@ -1,6 +1,6 @@
 #!/usr/bin/env ruby
 # == NAME
-# metadata_set_to_table.rb
+# beekeeper.rb
 #
 # == AUTHOR
 #  Marc Hoeppner, mphoeppner@gmail.com
@@ -9,12 +9,9 @@ require 'optparse'
 require 'ostruct'
 require 'rest_client'
 require 'json'
-<<<<<<< HEAD
 require "zlib"
 require 'base64'
-=======
 require 'fileutils'
->>>>>>> 82ec382f4b08ecf76faee85a1ff1127b39cc612e
 
 # Configuration
 $server = 'localhost:3001/api/v1'
